@@ -1,0 +1,13 @@
+{
+  "name": "pdp-rewriter",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/extension",
+    "packages/proxy-vercel"
+  ],
+  "scripts": {
+    "build": "echo \"Nothing to build\"",
+    "dev": "npm -w packages/proxy-vercel run dev"
+  }
+}

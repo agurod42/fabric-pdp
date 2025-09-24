@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "PDP Rewriter",
+  "version": "0.1.0",
+  "description": "Detects PDP pages with an LLM and rewrites content. Auto-apply with Revert + whitelist.",
+  "action": {
+    "default_title": "PDP Rewriter",
+    "default_popup": "popup/index.html"
+  },
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_ui": {
+    "page": "options/index.html",
+    "open_in_tab": true
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "popup/*",
+        "icons/*",
+        "styles/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}

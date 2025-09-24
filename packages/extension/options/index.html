@@ -1,0 +1,30 @@
+
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>PDP Rewriter Settings</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 24px; }
+      input, button { padding:8px; border-radius:8px; border:1px solid #d1d5db; }
+      button { cursor:pointer; }
+      ul { list-style:none; padding:0; }
+      li { display:flex; align-items:center; gap:8px; margin:6px 0; }
+      code { background:#f3f4f6; padding:2px 4px; border-radius:6px; }
+      .row { display:flex; gap:8px; margin-top: 8px; }
+      .tip { color:#374151; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <h2>PDP Rewriter — Settings</h2>
+    <p class="tip">Whitelist hostnames to restrict where the extension runs. Leave empty to allow <strong>all sites</strong>. Wildcards supported, e.g. <code>*.shopify.com</code>, <code>amazon.com</code>.</p>
+    <div class="row">
+      <input id="host" placeholder="e.g. *.shopify.com" style="flex:1"/>
+      <button id="add">Add</button>
+      <button id="clear">Allow All (clear list)</button>
+    </div>
+    <ul id="list"></ul>
+    <script src="index.js"></script>
+  </body>
+</html>
