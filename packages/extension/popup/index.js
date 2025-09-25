@@ -41,6 +41,7 @@ async function init(){
   app.innerHTML = `
     <h3>Detected PDP</h3>
     <div class="status"><small class="mono">${url}</small></div>
+    <div id="summary" class="summary"></div>
     <div class="grid">
       ${sec("Title", plan.fields?.title)}
       ${sec("Description", plan.fields?.description)}
@@ -61,6 +62,24 @@ async function init(){
     window.close();
   });
   bindOptions();
+
+  // fetch latest apply summary (if any) for this tab+url
+  try {
+    const { summary } = await api.runtime.sendMessage({ type: "GET_APPLY_SUMMARY", url });
+    const box = document.getElementById("summary");
+    if (box && summary && typeof summary === 'object') {
+      const parts = [];
+      parts.push(`<div class=\"summary-row\"><strong>Patch</strong>: ${summary.steps_applied || 0}/${summary.steps_total || 0} applied` +
+        (summary.steps_skipped ? `, ${summary.steps_skipped} skipped` : '') +
+        (summary.steps_error ? `, ${summary.steps_error} errors` : '') +
+        ` (${summary.took_ms || 0} ms)</div>`);
+      const details = Array.isArray(summary.results) ? summary.results.slice(0, 6).map(r => {
+        const badge = r.status === 'applied' ? '✅' : r.status === 'skipped' ? '⚠️' : '❌';
+        return `<div class=\"result\">${badge} <code>${r.op}</code> <code>${r.selector}</code> — ${r.status}${r.note ? ` (${r.note})` : ''}</div>`;
+      }).join("") : "";
+      box.innerHTML = `<div class=\"card\">${parts.join("")}${details}</div>`;
+    }
+  } catch {}
 }
 
 function makeInverse(plan){

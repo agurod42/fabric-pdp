@@ -65,11 +65,24 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const results = await api.scripting.executeScript({ target: { tabId: sender.tab.id }, func: applyPatchInPage, args: [msg.plan] });
           const summary = Array.isArray(results) ? (results[0]?.result ?? null) : null;
           log("APPLY_PATCH done", { took_ms: Date.now() - t0, summary });
+          try {
+            const key = `summary:${sender.tab?.id}|${msg.url || ""}`;
+            if (sender.tab?.id != null && typeof msg.url === "string") {
+              sessionCache.set(key, summary);
+              log("APPLY_PATCH cached summary", { key });
+            }
+          } catch {}
           sendResponse({ ok: true, summary }); return;
         } catch (e) {
           console.error("[PDP][bg] APPLY_PATCH error", e);
           sendResponse({ error: String(e) }); return;
         }
+      }
+      if (msg.type === "GET_APPLY_SUMMARY") {
+        const key = `summary:${sender.tab?.id}|${msg.url}`;
+        const summary = sessionCache.get(key);
+        log("GET_APPLY_SUMMARY", { key, found: !!summary });
+        sendResponse({ summary }); return;
       }
       if (msg.type === "SHOULD_RUN") {
         const cfg = await api.storage.local.get(["whitelist"]);

@@ -98,7 +98,7 @@ async function main() {
     if (plan.is_pdp) {
       log("apply patch", { steps: plan?.patch?.length || 0 });
     try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "AP" }); } catch {}
-    const resp = await api.runtime.sendMessage({ type: "APPLY_PATCH", plan });
+    const resp = await api.runtime.sendMessage({ type: "APPLY_PATCH", plan, url });
     log("apply summary", resp?.summary || {});
     try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "PDP" }); } catch {}
     }

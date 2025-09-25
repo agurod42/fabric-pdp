@@ -10,3 +10,8 @@ button { padding: 6px 10px; border-radius: 8px; border:1px solid #d1d5db; backgr
 button:hover { background:#f3f4f6; }
 small.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .link { font-size: 12px; margin-top: 8px; }
+/* summary */
+.summary { margin: 6px 0 10px; font-size: 12px; color:#111827; }
+.summary .card { background:#f8fafc; }
+.summary-row { margin-bottom: 4px; }
+.result { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color:#374151; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
