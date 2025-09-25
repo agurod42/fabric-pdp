@@ -91,7 +91,7 @@ Rules:
     const maxTokensEnv = Number(process.env.LLM_MAX_TOKENS || "");
     const MAX_TOKENS = Number.isFinite(maxTokensEnv) && maxTokensEnv > 0 ? Math.min(Math.floor(maxTokensEnv), 32000) : 5000;
     const resp = await oai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: process.env.LLM_MODEL || "gpt-4o",
       messages,
       temperature: 0.2,
       max_tokens: MAX_TOKENS,
@@ -109,6 +109,9 @@ Rules:
       if (payload.html_truncated) obj.warnings.push("Input HTML was truncated before analysis; results may be incomplete.");
       // Normalize patch to always use { selector, op, value|valueRef }
       type PatchStep = { selector: string; op: "setText" | "setHTML"; valueRef?: string; value?: string };
+      const looksLikeRef = (s: string): boolean => {
+        return typeof s === 'string' && /^fields\.(title|description|shipping|returns)\.(proposed|original)$/.test(s.trim());
+      };
       const normalizePatch = (arr: any): PatchStep[] => {
         if (!Array.isArray(arr)) return [];
         const normalized: PatchStep[] = [];
@@ -121,8 +124,8 @@ Rules:
           if (typeof st.value === "string") {
             value = st.value;
           } else if (typeof st.valueRef === "string") {
-            // If valueRef looks like a path (has a dot), keep as ref; else treat as literal value
-            if (st.valueRef.includes(".") || /^fields\./.test(st.valueRef)) valueRef = st.valueRef;
+            // Treat as ref only for known safe ref patterns; otherwise it's a literal value
+            if (looksLikeRef(st.valueRef)) valueRef = st.valueRef.trim();
             else value = st.valueRef;
           }
           const out: PatchStep = { selector: st.selector, op };
@@ -134,6 +137,19 @@ Rules:
         return normalized;
       };
       obj.patch = normalizePatch(obj.patch);
+      // Ensure fields.*.proposed strings exist for references; fallback to empty strings
+      const ensure = (k: string) => {
+        const f = obj.fields?.[k];
+        if (!obj.fields) obj.fields = {};
+        if (!f || typeof f !== 'object') obj.fields[k] = { selector: '', original: '', proposed: '', html: (k !== 'title') };
+        else {
+          if (typeof f.proposed !== 'string') f.proposed = '';
+          if (typeof f.original !== 'string') f.original = '';
+          if (typeof f.selector !== 'string') f.selector = '';
+          if (typeof f.html !== 'boolean') f.html = (k !== 'title');
+        }
+      };
+      ensure('title'); ensure('description'); ensure('shipping'); ensure('returns');
       // Re-serialize enriched object
       const enriched = JSON.stringify(obj);
       return new Response(enriched, {

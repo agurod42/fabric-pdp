@@ -88,8 +88,24 @@ async function main() {
   log("send LLM_ANALYZE", approx);
   try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "…" }); } catch {}
   const res = await api.runtime.sendMessage({ type: "LLM_ANALYZE", payload });
-    const plan = res?.plan;
+    let plan = res?.plan;
     if (!plan) throw new Error("No plan");
+
+    // Enrich plan with DOM originals if missing, to improve popup and revert accuracy
+    try {
+      const keys = ["title","description","shipping","returns"];
+      plan.fields = plan.fields || {};
+      for (const key of keys) {
+        const f = plan.fields[key];
+        if (!f || !f.selector) continue;
+        const node = document.querySelector(f.selector);
+        if (!node) continue;
+        if (typeof f.original !== 'string' || f.original.length === 0) {
+          const value = f.html ? String(node.innerHTML ?? '') : String(node.textContent ?? '');
+          plan.fields[key] = { ...f, original: value };
+        }
+      }
+    } catch {}
 
     await api.runtime.sendMessage({ type: "CACHE_PLAN", url, plan });
     log("cached plan", { is_pdp: !!plan?.is_pdp, took_ms: Date.now() - t0 });

@@ -50,37 +50,107 @@ async function init(){
       ${sec("Returns", plan.fields?.returns)}
     </div>
     <div class="actions">
-      <button id="revert">Revert</button>
+      <button id="revert" disabled>Revert</button>
+      <button id="reapply" disabled>Re-apply</button>
     </div>
     <div class="link"><a id="openOptions" href="#">Settings (whitelist)</a></div>
   `;
-  document.getElementById("revert").addEventListener("click", async () => {
-    log("revert clicked");
-    const inverse = makeInverse(plan);
+  bindOptions();
+
+  // fetch latest apply summary (if any) for this tab+url
+  let latestSummary = null;
+  try {
+    const { summary } = await api.runtime.sendMessage({ type: "GET_APPLY_SUMMARY", url, tabId });
+    const box = document.getElementById("summary");
+    if (box && summary && typeof summary === 'object') {
+      latestSummary = summary;
+      const parts = [];
+      parts.push(`<div class="summary-row"><strong>Patch</strong>: ${summary.steps_applied || 0}/${summary.steps_total || 0} applied` +
+        (summary.steps_skipped ? `, ${summary.steps_skipped} skipped` : '') +
+        (summary.steps_error ? `, ${summary.steps_error} errors` : '') +
+        ` (${summary.took_ms || 0} ms)</div>`);
+      const details = Array.isArray(summary.results) ? summary.results.map(r => {
+        const badge = r.status === 'applied' ? '✅' : r.status === 'skipped' ? '⚠️' : '❌';
+        const val = (typeof r.value === 'string') ? r.value : '';
+        return `<div class="result">${badge} <code>${r.op}</code> <code>${r.selector}</code> — ${r.status}${r.note ? ` (${r.note})` : ''}${val ? `<div><small>value:</small> ${val}</div>` : ''}</div>`;
+      }).join("") : "";
+      box.innerHTML = `<div class="card">${parts.join("")}${details}</div>`;
+    }
+  } catch {}
+
+  const revertBtn = document.getElementById("revert");
+  const reapplyBtn = document.getElementById("reapply");
+
+  const hasApplied = Array.isArray(latestSummary?.results) && latestSummary.results.some(r => r.status === 'applied');
+  const hasPrev = Array.isArray(latestSummary?.results) && latestSummary.results.some(r => typeof r.prev === 'string');
+
+  // Enable revert only if there were applied steps
+  if (hasApplied) revertBtn.removeAttribute('disabled');
+  // Enable re-apply only if we can revert (i.e., have prev snapshots)
+  if (hasPrev) reapplyBtn.removeAttribute('disabled');
+
+  function buildRevertFromSummary(plan, summary){
+    const inv = { ...plan, patch: [] };
+    const steps = Array.isArray(summary?.results) ? summary.results : [];
+    for (const r of steps) {
+      if (r.status !== 'applied') continue;
+      if (!r.selector || !r.op) continue;
+      // Use captured prev content if present, else fall back to fields.original by selector match
+      if (typeof r.prev === 'string') {
+        inv.patch.push({ selector: r.selector, op: r.op, value: r.prev });
+      } else {
+        for (const key of ["title","description","shipping","returns"]) {
+          const f = plan.fields?.[key];
+          if (f?.selector === r.selector) {
+            inv.patch.push({ selector: f.selector, op: (f.html ? "setHTML" : "setText"), valueRef: `fields.${key}.original` });
+            break;
+          }
+        }
+      }
+    }
+    return inv;
+  }
+
+  function buildReapplyFromSummary(plan, summary){
+    const fwd = { ...plan, patch: [] };
+    const steps = Array.isArray(summary?.results) ? summary.results : [];
+    for (const r of steps) {
+      if (r.status !== 'applied') continue;
+      if (!r.selector || !r.op) continue;
+      if (typeof r.value === 'string') {
+        fwd.patch.push({ selector: r.selector, op: r.op, value: r.value });
+      } else {
+        for (const key of ["title","description","shipping","returns"]) {
+          const f = plan.fields?.[key];
+          if (f?.selector === r.selector) {
+            fwd.patch.push({ selector: f.selector, op: (f.html ? "setHTML" : "setText"), valueRef: `fields.${key}.proposed` });
+            break;
+          }
+        }
+      }
+    }
+    return fwd;
+  }
+
+  revertBtn.addEventListener("click", async () => {
+    if (!latestSummary) return;
+    const inverse = buildRevertFromSummary(plan, latestSummary);
+    log("revert clicked", { steps: inverse.patch.length });
     try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "AP", tabId }); } catch {}
     await api.runtime.sendMessage({ type: "APPLY_PATCH", plan: inverse, tabId });
     try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "PDP", tabId }); } catch {}
     window.close();
   });
-  bindOptions();
 
-  // fetch latest apply summary (if any) for this tab+url
-  try {
-    const { summary } = await api.runtime.sendMessage({ type: "GET_APPLY_SUMMARY", url, tabId });
-    const box = document.getElementById("summary");
-    if (box && summary && typeof summary === 'object') {
-      const parts = [];
-      parts.push(`<div class=\"summary-row\"><strong>Patch</strong>: ${summary.steps_applied || 0}/${summary.steps_total || 0} applied` +
-        (summary.steps_skipped ? `, ${summary.steps_skipped} skipped` : '') +
-        (summary.steps_error ? `, ${summary.steps_error} errors` : '') +
-        ` (${summary.took_ms || 0} ms)</div>`);
-      const details = Array.isArray(summary.results) ? summary.results.slice(0, 6).map(r => {
-        const badge = r.status === 'applied' ? '✅' : r.status === 'skipped' ? '⚠️' : '❌';
-        return `<div class=\"result\">${badge} <code>${r.op}</code> <code>${r.selector}</code> — ${r.status}${r.note ? ` (${r.note})` : ''}</div>`;
-      }).join("") : "";
-      box.innerHTML = `<div class=\"card\">${parts.join("")}${details}</div>`;
-    }
-  } catch {}
+  reapplyBtn.addEventListener("click", async () => {
+    if (!latestSummary) return;
+    const forward = buildReapplyFromSummary(plan, latestSummary);
+    log("reapply clicked", { steps: forward.patch.length });
+    try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "AP", tabId }); } catch {}
+    await api.runtime.sendMessage({ type: "APPLY_PATCH", plan: forward, tabId });
+    try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "PDP", tabId }); } catch {}
+    window.close();
+  });
 }
 
 function makeInverse(plan){

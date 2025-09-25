@@ -204,8 +204,14 @@ function applyPatchInPage(plan) {
       if (typeof val !== "string" || val.length === 0) { entry.status = "skipped"; entry.note = "value not string"; log("value not string", step.valueRef); results.push(entry); continue; }
       if (deny.test(val)) { entry.status = "skipped"; entry.note = "value denied by policy"; log("value denied", step.valueRef); results.push(entry); continue; }
       const outVal = ensurePrefixed(val);
-      if (step.op === "setText") { node.textContent = outVal; entry.status = "applied"; log("setText", step.selector); }
-      else if (step.op === "setHTML") { node.innerHTML = outVal; entry.status = "applied"; log("setHTML", step.selector); }
+      if (step.op === "setText") {
+        entry.prev = String(node.textContent ?? "");
+        node.textContent = outVal; entry.status = "applied"; entry.value = outVal; log("setText", step.selector);
+      }
+      else if (step.op === "setHTML") {
+        entry.prev = String(node.innerHTML ?? "");
+        node.innerHTML = outVal; entry.status = "applied"; entry.value = outVal; log("setHTML", step.selector);
+      }
       else { entry.status = "skipped"; entry.note = "unknown op"; log("unknown op", step.op); }
     } catch(e){ entry.status = "error"; entry.note = String(e); }
     results.push(entry);
