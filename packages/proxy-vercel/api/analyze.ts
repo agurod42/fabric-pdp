@@ -1,6 +1,7 @@
 
 export const config = { runtime: "edge" };
 import OpenAI from "openai";
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -16,13 +17,26 @@ function jsonResponse(body, status = 200) {
 }
 
 export default async function handler(req) {
+  const t0 = Date.now();
   if (req.method === "OPTIONS") return jsonResponse({}, 204);
   if (req.method !== "POST") return jsonResponse({ error: "Use POST" }, 405);
 
-  const { url, title, meta, heuristics, html_excerpt, language } = await req.json().catch(() => ({}));
+  const { url, title, meta, heuristics, html_excerpt, language } = await req.json().catch((e) => {
+    console.error("[PDP][api] JSON parse error:", e);
+    return {};
+  });
+
+  try {
+    const sizes = {
+      html_excerpt_len: typeof html_excerpt === "string" ? html_excerpt.length : 0,
+      meta_keys: meta ? Object.keys(meta).length : 0,
+    };
+    console.debug("[PDP][api] request", { url, lang: language, heuristics, sizes });
+  } catch {}
 
   const openaiKey = process.env.OPENAI_API_KEY;
   if (!openaiKey) {
+    console.warn("[PDP][api] OPENAI_API_KEY not set; returning mock response");
     const isPdp = heuristics?.hasPrice && heuristics?.hasAddToCart;
     return jsonResponse({
       is_pdp: !!isPdp,
@@ -50,7 +64,7 @@ Rules:
 - Build a patch array with selectors + setText/setHTML + valueRef to proposed values.
 - Do not include scripts or external links. Keep HTML minimal (<p>, <ul>, <li>, <strong>, <em>).`;
 
-    const messages = [
+    const messages: ChatCompletionMessageParam[] = [
       { role: "system", content: SYS_PROMPT },
       { role: "user", content: JSON.stringify({ url, title, meta, heuristics, language, html_excerpt }) }
     ];
@@ -66,6 +80,11 @@ Rules:
     const start = txt.indexOf("{");
     const end = txt.lastIndexOf("}");
     const raw = txt.slice(start, end + 1);
+    console.debug("[PDP][api] openai response parsed", {
+      took_ms: Date.now() - t0,
+      content_len: txt.length,
+      raw_len: raw.length,
+    });
     return new Response(raw, {
       status: 200,
       headers: {
@@ -77,6 +96,7 @@ Rules:
       },
     });
   } catch (e) {
+    console.error("[PDP][api] error", e);
     return jsonResponse({ error: String(e?.message || e) }, 500);
   }
 }

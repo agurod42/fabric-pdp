@@ -78,21 +78,36 @@ function patternToRegex(pattern) {
 }
 
 async function callLLM(payload) {
-  log("callLLM → fetch", { url: payload?.url });
-  const resp = await fetch(PROXY_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-  log("callLLM ← response", { status: resp.status });
-  const txt = await resp.text();
-  let plan; try { plan = JSON.parse(txt) } catch { throw new Error("LLM returned non-JSON"); }
-  if (!plan || typeof plan.is_pdp !== "boolean") throw new Error("Invalid plan schema");
-
-  const deny = /(?:<script|javascript:|on\w+=|<iframe|<object|fetch\(|XMLHttpRequest|WebSocket|eval|Function|import\(|window\.|document\.write|chrome\.|browser\.)/i;
-  plan.patch = Array.isArray(plan.patch) ? plan.patch.filter(st => st && typeof st.selector === "string" && ["setText","setHTML"].includes(st.op) && typeof st.valueRef === "string") : [];
-  for (const k of ["title","description","shipping","returns"]) {
-    const f = plan.fields?.[k];
-    if (f && typeof f.proposed === "string" && deny.test(f.proposed)) f.proposed = "";
+  const t0 = Date.now();
+  try {
+    const approx = {
+      html_excerpt_len: typeof payload?.html_excerpt === "string" ? payload.html_excerpt.length : 0,
+      has_heuristics: !!payload?.heuristics,
+    };
+    log("callLLM → fetch", { url: payload?.url, approx });
+    const resp = await fetch(PROXY_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    log("callLLM ← response", { status: resp.status, took_ms: Date.now() - t0 });
+    const txt = await resp.text();
+    let plan; try { plan = JSON.parse(txt) } catch (e) {
+      log("callLLM parse error", { took_ms: Date.now() - t0, text_len: txt.length, snippet: txt.slice(0, 120) });
+      throw new Error("LLM returned non-JSON");
+    }
+    if (!plan || typeof plan.is_pdp !== "boolean") {
+      log("callLLM schema invalid", { keys: Object.keys(plan || {}) });
+      throw new Error("Invalid plan schema");
+    }
+    const deny = /(?:<script|javascript:|on\w+=|<iframe|<object|fetch\(|XMLHttpRequest|WebSocket|eval|Function|import\(|window\.|document\.write|chrome\.|browser\.)/i;
+    plan.patch = Array.isArray(plan.patch) ? plan.patch.filter(st => st && typeof st.selector === "string" && ["setText","setHTML"].includes(st.op) && typeof st.valueRef === "string") : [];
+    for (const k of ["title","description","shipping","returns"]) {
+      const f = plan.fields?.[k];
+      if (f && typeof f.proposed === "string" && deny.test(f.proposed)) f.proposed = "";
+    }
+    log("callLLM parsed", { is_pdp: plan.is_pdp, patch: plan.patch.length, took_ms: Date.now() - t0 });
+    return plan;
+  } catch (e) {
+    console.error("[PDP][bg] callLLM error", e);
+    throw e;
   }
-  log("callLLM parsed", { is_pdp: plan.is_pdp, patch: plan.patch.length });
-  return plan;
 }
 
 function applyPatchInPage(plan) {

@@ -28,6 +28,7 @@ function htmlExcerpt() {
 async function main() {
   try {
     const url = location.href;
+    const t0 = Date.now();
     log("start", { url });
     const { ok } = await api.runtime.sendMessage({ type: "SHOULD_RUN", url });
     if (!ok) return;
@@ -41,13 +42,17 @@ async function main() {
       language: document.documentElement.getAttribute("lang") || navigator.language || "en"
     };
 
-    log("send LLM_ANALYZE");
+    const approx = {
+      html_excerpt_len: typeof payload.html_excerpt === "string" ? payload.html_excerpt.length : 0,
+      heuristics: payload.heuristics,
+    };
+    log("send LLM_ANALYZE", approx);
     const res = await api.runtime.sendMessage({ type: "LLM_ANALYZE", payload });
     const plan = res?.plan;
     if (!plan) throw new Error("No plan");
 
     await api.runtime.sendMessage({ type: "CACHE_PLAN", url, plan });
-    log("cached plan", { is_pdp: !!plan?.is_pdp });
+    log("cached plan", { is_pdp: !!plan?.is_pdp, took_ms: Date.now() - t0 });
     await api.runtime.sendMessage({ type: "SET_BADGE", text: plan.is_pdp ? "PDP" : "—" });
 
     if (plan.is_pdp) {
