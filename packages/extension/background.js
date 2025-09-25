@@ -141,18 +141,28 @@ async function callLLM(payload) {
     };
     log("callLLM → fetch", { url: payload?.url, approx });
     const resp = await fetch(PROXY_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    log("callLLM ← response", { status: resp.status, took_ms: Date.now() - t0 });
-    const txt = await resp.text();
-    let plan; try { plan = JSON.parse(txt) } catch (e) {
-      log("callLLM parse error", { took_ms: Date.now() - t0, text_len: txt.length, snippet: txt });
-      throw new Error("LLM returned non-JSON");
-    }
+    console.log("resp", resp);
+    const plan = await resp.json();
+    log("callLLM ← response", { status: resp.status, took_ms: Date.now() - t0, plan });
     if (!plan || typeof plan.is_pdp !== "boolean") {
       log("callLLM schema invalid", { keys: Object.keys(plan || {}) });
       throw new Error("Invalid plan schema");
     }
     const deny = /(?:<script|javascript:|on\w+=|<iframe|<object|fetch\(|XMLHttpRequest|WebSocket|eval|Function|import\(|window\.|document\.write|chrome\.|browser\.)/i;
-    plan.patch = Array.isArray(plan.patch) ? plan.patch.filter(st => st && typeof st.selector === "string" && ["setText","setHTML"].includes(st.op) && typeof st.valueRef === "string") : [];
+    // Normalize patch steps from proxy (supports { op } or { setText/setHTML } and literal values)
+    const normalizePatch = (arr) => {
+      if (!Array.isArray(arr)) return [];
+      return arr.map((st) => {
+        if (!st || typeof st.selector !== "string") return null;
+        const op = st.op || (st.setText ? "setText" : (st.setHTML ? "setHTML" : undefined));
+        if (!op || !["setText", "setHTML"].includes(op)) return null;
+        const normalized = { selector: st.selector, op };
+        if (typeof st.value === "string") normalized.value = st.value;
+        if (typeof st.valueRef === "string") normalized.valueRef = st.valueRef;
+        return normalized;
+      }).filter(Boolean);
+    };
+    plan.patch = normalizePatch(plan.patch);
     for (const k of ["title","description","shipping","returns"]) {
       const f = plan.fields?.[k];
       if (f && typeof f.proposed === "string" && deny.test(f.proposed)) f.proposed = "";
@@ -179,8 +189,14 @@ function applyPatchInPage(plan) {
     try {
       const node = document.querySelector(step.selector);
       if (!node) { entry.status = "skipped"; entry.note = "selector not found"; log("selector not found", step.selector); results.push(entry); continue; }
-      const val = get(step.valueRef);
-      if (typeof val !== "string") { entry.status = "skipped"; entry.note = "value not string"; log("value not string", step.valueRef); results.push(entry); continue; }
+      let val = "";
+      if (typeof step.value === "string") {
+        val = step.value;
+      } else if (typeof step.valueRef === "string") {
+        const deref = get(step.valueRef);
+        val = (typeof deref === "string") ? deref : step.valueRef; // fall back to literal
+      }
+      if (typeof val !== "string" || val.length === 0) { entry.status = "skipped"; entry.note = "value not string"; log("value not string", step.valueRef); results.push(entry); continue; }
       if (deny.test(val)) { entry.status = "skipped"; entry.note = "value denied by policy"; log("value denied", step.valueRef); results.push(entry); continue; }
       if (step.op === "setText") { node.textContent = val; entry.status = "applied"; log("setText", step.selector); }
       else if (step.op === "setHTML") { node.innerHTML = val; entry.status = "applied"; log("setHTML", step.selector); }
