@@ -166,6 +166,8 @@ function applyPatchInPage(plan) {
   const log = (...args) => { try { console.debug("[PDP][apply]", ...args); } catch(_){} };
   function get(path){ return path.split(".").reduce((a,k)=>a?.[k], plan); }
   const deny = /(?:<script|javascript:|on\w+=|<iframe|<object)/i;
+  const PREFIX = "[PDP] ";
+  const ensurePrefixed = (s) => (typeof s === "string" && !s.startsWith(PREFIX)) ? (PREFIX + s) : s;
   const t0 = Date.now();
   const steps = Array.isArray(plan.patch) ? plan.patch : [];
   const results = [];
@@ -180,13 +182,30 @@ function applyPatchInPage(plan) {
       if (typeof step.value === "string") {
         val = step.value;
       } else if (typeof step.valueRef === "string") {
-        const deref = get(step.valueRef);
-        val = (typeof deref === "string") ? deref : step.valueRef; // fall back to literal
+        const ref = step.valueRef;
+        const deref = get(ref);
+        if (typeof deref === "string") {
+          val = deref;
+        } else {
+          // Compatibility: if ref is like fields.key.proposed, try top-level key
+          const m = /^fields\.(title|description|shipping|returns)\.proposed$/.exec(ref);
+          if (m) {
+            const alt = plan?.[m[1]];
+            if (typeof alt === "string") val = alt;
+          }
+          // If ref looks like a path but unresolved, skip rather than injecting the ref string
+          if (!val && ref.includes(".")) {
+            entry.status = "skipped"; entry.note = "unresolved valueRef"; log("unresolved valueRef", ref); results.push(entry); continue;
+          }
+          // If it's not a path (no dots), treat as literal fallback
+          if (!val) val = ref;
+        }
       }
       if (typeof val !== "string" || val.length === 0) { entry.status = "skipped"; entry.note = "value not string"; log("value not string", step.valueRef); results.push(entry); continue; }
       if (deny.test(val)) { entry.status = "skipped"; entry.note = "value denied by policy"; log("value denied", step.valueRef); results.push(entry); continue; }
-      if (step.op === "setText") { node.textContent = val; entry.status = "applied"; log("setText", step.selector); }
-      else if (step.op === "setHTML") { node.innerHTML = val; entry.status = "applied"; log("setHTML", step.selector); }
+      const outVal = ensurePrefixed(val);
+      if (step.op === "setText") { node.textContent = outVal; entry.status = "applied"; log("setText", step.selector); }
+      else if (step.op === "setHTML") { node.innerHTML = outVal; entry.status = "applied"; log("setHTML", step.selector); }
       else { entry.status = "skipped"; entry.note = "unknown op"; log("unknown op", step.op); }
     } catch(e){ entry.status = "error"; entry.note = String(e); }
     results.push(entry);
