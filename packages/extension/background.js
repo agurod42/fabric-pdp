@@ -179,6 +179,8 @@ function applyPatchInPage(plan) {
       const node = document.querySelector(step.selector);
       if (!node) { entry.status = "skipped"; entry.note = "selector not found"; log("selector not found", step.selector); results.push(entry); continue; }
       let val = "";
+      const allowEmpty = !!step.allowEmpty;
+      const noPrefix = !!step.noPrefix;
       if (typeof step.value === "string") {
         val = step.value;
       } else if (typeof step.valueRef === "string") {
@@ -201,9 +203,10 @@ function applyPatchInPage(plan) {
           if (!val) val = ref;
         }
       }
-      if (typeof val !== "string" || val.length === 0) { entry.status = "skipped"; entry.note = "value not string"; log("value not string", step.valueRef); results.push(entry); continue; }
+      if (typeof val !== "string") { entry.status = "skipped"; entry.note = "value not string"; log("value not string", step.valueRef); results.push(entry); continue; }
+      if (val.length === 0 && !allowEmpty) { entry.status = "skipped"; entry.note = "empty value"; log("empty value", step.valueRef); results.push(entry); continue; }
       if (deny.test(val)) { entry.status = "skipped"; entry.note = "value denied by policy"; log("value denied", step.valueRef); results.push(entry); continue; }
-      const outVal = ensurePrefixed(val);
+      const outVal = noPrefix ? val : ensurePrefixed(val);
       if (step.op === "setText") {
         entry.prev = String(node.textContent ?? "");
         node.textContent = outVal; entry.status = "applied"; entry.value = outVal; log("setText", step.selector);

@@ -97,12 +97,12 @@ async function init(){
       if (!r.selector || !r.op) continue;
       // Use captured prev content if present, else fall back to fields.original by selector match
       if (typeof r.prev === 'string') {
-        inv.patch.push({ selector: r.selector, op: r.op, value: r.prev });
+        inv.patch.push({ selector: r.selector, op: r.op, value: r.prev, noPrefix: true, allowEmpty: true });
       } else {
         for (const key of ["title","description","shipping","returns"]) {
           const f = plan.fields?.[key];
           if (f?.selector === r.selector) {
-            inv.patch.push({ selector: f.selector, op: (f.html ? "setHTML" : "setText"), valueRef: `fields.${key}.original` });
+            inv.patch.push({ selector: f.selector, op: (f.html ? "setHTML" : "setText"), valueRef: `fields.${key}.original`, noPrefix: true, allowEmpty: true });
             break;
           }
         }
