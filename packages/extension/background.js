@@ -29,14 +29,17 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg.type === "LLM_ANALYZE") {
         log("LLM_ANALYZE start", { url: msg?.payload?.url });
         const plan = await callLLM(msg.payload);
-        const key = `${sender.tab?.id}|${msg.payload.url}`;
-        sessionCache.set(key, plan);
-        try { await cacheSet(`plan:${key}`, plan); } catch {}
+        const tabId = sender.tab?.id;
+        if (tabId != null) {
+          const key = `plan:${tabId}`;
+          sessionCache.set(key, plan);
+          try { await cacheSet(key, plan); } catch {}
+        }
         log("LLM_ANALYZE done", { is_pdp: !!plan?.is_pdp, patch: plan?.patch?.length || 0 });
         sendResponse({ plan }); return;
       }
       if (msg.type === "SET_BADGE") {
-        const tabId = sender.tab?.id;
+        const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
         if (tabId != null) {
           await api.action.setBadgeText({ text: msg.text, tabId });
           const color = (msg.text === "PDP") ? "#00A86B"
@@ -50,24 +53,28 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true }); return;
       }
       if (msg.type === "CACHE_PLAN") {
-        const key = `${sender.tab?.id}|${msg.url}`;
-        sessionCache.set(key, msg.plan);
-        try { await cacheSet(`plan:${key}`, msg.plan); } catch {}
-        log("CACHE_PLAN", { key });
+        const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
+        if (tabId != null) {
+          const key = `plan:${tabId}`;
+          sessionCache.set(key, msg.plan);
+          try { await cacheSet(key, msg.plan); } catch {}
+          log("CACHE_PLAN", { key });
+        }
         sendResponse({ ok: true }); return;
       }
       if (msg.type === "GET_PLAN") {
-        const key = `${sender.tab?.id}|${msg.url}`;
-        let plan = sessionCache.get(key);
-        if (!plan) {
-          plan = await cacheGet(`plan:${key}`);
+        const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
+        const key = (tabId != null) ? `plan:${tabId}` : undefined;
+        let plan = key ? sessionCache.get(key) : undefined;
+        if (!plan && key) {
+          plan = await cacheGet(key);
           if (plan) sessionCache.set(key, plan);
         }
         log("GET_PLAN", { key, found: !!plan });
         sendResponse({ plan }); return;
       }
       if (msg.type === "APPLY_PATCH") {
-        const tabId = sender?.tab?.id;
+        const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender?.tab?.id;
         const steps = msg?.plan?.patch?.length || 0;
         const t0 = Date.now();
         log("APPLY_PATCH start", { tabId, steps });
@@ -75,12 +82,12 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           if (tabId != null) {
             try { await api.action.setBadgeText({ text: "AP", tabId }); await api.action.setBadgeBackgroundColor({ color: "#F0B429", tabId }); } catch {}
           }
-          const results = await api.scripting.executeScript({ target: { tabId: sender.tab.id }, func: applyPatchInPage, args: [msg.plan] });
+          const results = await api.scripting.executeScript({ target: { tabId }, func: applyPatchInPage, args: [msg.plan] });
           const summary = Array.isArray(results) ? (results[0]?.result ?? null) : null;
           log("APPLY_PATCH done", { took_ms: Date.now() - t0, summary });
           try {
-            const key = `summary:${sender.tab?.id}|${msg.url || ""}`;
-            if (sender.tab?.id != null && typeof msg.url === "string") {
+            const key = (tabId != null) ? `summary:${tabId}` : undefined;
+            if (key) {
               sessionCache.set(key, summary);
               try { await cacheSet(key, summary); } catch {}
               log("APPLY_PATCH cached summary", { key });
@@ -93,9 +100,10 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       }
       if (msg.type === "GET_APPLY_SUMMARY") {
-        const key = `summary:${sender.tab?.id}|${msg.url}`;
-        let summary = sessionCache.get(key);
-        if (!summary) {
+        const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
+        const key = (tabId != null) ? `summary:${tabId}` : undefined;
+        let summary = key ? sessionCache.get(key) : undefined;
+        if (!summary && key) {
           summary = await cacheGet(key);
           if (summary) sessionCache.set(key, summary);
         }

@@ -7,8 +7,9 @@ async function init(){
   log("init popup");
   const [tab] = await api.tabs.query({ active:true, currentWindow:true });
   const url = tab.url;
+  const tabId = tab.id;
   log("current tab", { url });
-  const res = await api.runtime.sendMessage({ type: "GET_PLAN", url });
+  const res = await api.runtime.sendMessage({ type: "GET_PLAN", url, tabId });
   const plan = res?.plan;
   const app = document.getElementById("app");
   if (!plan) {
@@ -56,16 +57,16 @@ async function init(){
   document.getElementById("revert").addEventListener("click", async () => {
     log("revert clicked");
     const inverse = makeInverse(plan);
-    try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "AP" }); } catch {}
-    await api.runtime.sendMessage({ type: "APPLY_PATCH", plan: inverse });
-    try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "PDP" }); } catch {}
+    try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "AP", tabId }); } catch {}
+    await api.runtime.sendMessage({ type: "APPLY_PATCH", plan: inverse, tabId });
+    try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "PDP", tabId }); } catch {}
     window.close();
   });
   bindOptions();
 
   // fetch latest apply summary (if any) for this tab+url
   try {
-    const { summary } = await api.runtime.sendMessage({ type: "GET_APPLY_SUMMARY", url });
+    const { summary } = await api.runtime.sendMessage({ type: "GET_APPLY_SUMMARY", url, tabId });
     const box = document.getElementById("summary");
     if (box && summary && typeof summary === 'object') {
       const parts = [];
