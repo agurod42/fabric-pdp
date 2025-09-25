@@ -1,5 +1,7 @@
 
 const api = (typeof browser !== 'undefined') ? browser : chrome;
+const DEBUG = true;
+const log = (...args) => { if (DEBUG) console.debug("[PDP][content]", ...args); };
 
 const MAX_HTML = 200000;
 
@@ -26,6 +28,7 @@ function htmlExcerpt() {
 async function main() {
   try {
     const url = location.href;
+    log("start", { url });
     const { ok } = await api.runtime.sendMessage({ type: "SHOULD_RUN", url });
     if (!ok) return;
 
@@ -38,18 +41,23 @@ async function main() {
       language: document.documentElement.getAttribute("lang") || navigator.language || "en"
     };
 
+    log("send LLM_ANALYZE");
     const res = await api.runtime.sendMessage({ type: "LLM_ANALYZE", payload });
     const plan = res?.plan;
     if (!plan) throw new Error("No plan");
 
     await api.runtime.sendMessage({ type: "CACHE_PLAN", url, plan });
+    log("cached plan", { is_pdp: !!plan?.is_pdp });
     await api.runtime.sendMessage({ type: "SET_BADGE", text: plan.is_pdp ? "PDP" : "—" });
 
-    if (plan.is_pdp) await api.runtime.sendMessage({ type: "APPLY_PATCH", plan });
+    if (plan.is_pdp) {
+      log("apply patch", { steps: plan?.patch?.length || 0 });
+      await api.runtime.sendMessage({ type: "APPLY_PATCH", plan });
+    }
   } catch (e) {
-    console.error("content error", e);
+    console.error("[PDP][content] error", e);
     try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "ERR" }); } catch {}
   }
 }
 
-window.addEventListener("load", () => setTimeout(main, 600));
+window.addEventListener("load", () => { log("window load"); setTimeout(main, 600); });

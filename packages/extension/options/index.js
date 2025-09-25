@@ -1,7 +1,10 @@
 
 const api = (typeof browser !== 'undefined') ? browser : chrome;
+const DEBUG = true;
+const log = (...args) => { if (DEBUG) console.debug("[PDP][options]", ...args); };
 
 async function load(){
+  log("load whitelist");
   const cfg = await api.storage.local.get(["whitelist"]);
   const wl = cfg?.whitelist || [];
   render(wl);
@@ -17,6 +20,7 @@ function render(wl){
   list.querySelectorAll("button[data-i]").forEach(btn => {
     btn.addEventListener("click", async (e)=>{
       const i = parseInt(e.target.getAttribute("data-i"), 10);
+      log("remove host", { index: i });
       const cfg = await api.storage.local.get(["whitelist"]);
       const wl2 = cfg?.whitelist || [];
       wl2.splice(i,1);
@@ -29,6 +33,7 @@ function render(wl){
 document.getElementById("add").addEventListener("click", async ()=>{
   const host = document.getElementById("host").value.trim();
   if (!host) return;
+  log("add host", { host });
   const cfg = await api.storage.local.get(["whitelist"]);
   const wl = cfg?.whitelist || [];
   if (!wl.includes(host)) wl.push(host);
@@ -37,7 +42,9 @@ document.getElementById("add").addEventListener("click", async ()=>{
   render(wl);
 });
 document.getElementById("clear").addEventListener("click", async ()=>{
+  log("clear whitelist");
   await api.storage.local.set({ whitelist: [] });
   render([]);
 });
+log("options loaded");
 load();

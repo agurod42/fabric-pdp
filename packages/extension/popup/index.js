@@ -1,9 +1,13 @@
 
 const api = (typeof browser !== 'undefined') ? browser : chrome;
+const DEBUG = true;
+const log = (...args) => { if (DEBUG) console.debug("[PDP][popup]", ...args); };
 
 async function init(){
+  log("init popup");
   const [tab] = await api.tabs.query({ active:true, currentWindow:true });
   const url = tab.url;
+  log("current tab", { url });
   const res = await api.runtime.sendMessage({ type: "GET_PLAN", url });
   const plan = res?.plan;
   const app = document.getElementById("app");
@@ -49,6 +53,7 @@ async function init(){
     <div class="link"><a id="openOptions" href="#">Settings (whitelist)</a></div>
   `;
   document.getElementById("revert").addEventListener("click", async () => {
+    log("revert clicked");
     const inverse = makeInverse(plan);
     await api.runtime.sendMessage({ type: "APPLY_PATCH", plan: inverse });
     window.close();
@@ -65,6 +70,7 @@ function makeInverse(plan){
       inv.patch.push({ selector: f.selector, op: (f.html ? "setHTML" : "setText"), valueRef: `fields.${key}.original` });
     }
   }
+  log("inverse built", { steps: inv.patch.length });
   return inv;
 }
 
