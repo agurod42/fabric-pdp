@@ -74,7 +74,7 @@ Rules:
 - Determine if the page is a merchant Product Detail Page.
 - If is_pdp=true, extract title/description/shipping/returns + selectors where found.
 - Propose improved content: title <= 70 chars; description 120–200 words; shipping/returns 3–6 bullets each.
-- Build a patch array with selectors + setText/setHTML + valueRef to proposed values.
+- Build a patch array with objects of the form { selector, op: "setText"|"setHTML", valueRef?: string, value?: string }. Prefer valueRef pointing to proposed fields (e.g., "fields.title.proposed"). Use value only if you cannot reference a field.
 - Do not include scripts or external links. Keep HTML minimal (<p>, <ul>, <li>, <strong>, <em>).`;
 
     const messages: ChatCompletionMessageParam[] = [
@@ -101,6 +101,33 @@ Rules:
     if (obj && typeof obj === 'object') {
       if (!Array.isArray(obj.warnings)) obj.warnings = [];
       if (payload.html_truncated) obj.warnings.push("Input HTML was truncated before analysis; results may be incomplete.");
+      // Normalize patch to always use { selector, op, value|valueRef }
+      type PatchStep = { selector: string; op: "setText" | "setHTML"; valueRef?: string; value?: string };
+      const normalizePatch = (arr: any): PatchStep[] => {
+        if (!Array.isArray(arr)) return [];
+        const normalized: PatchStep[] = [];
+        for (const st of arr as any[]) {
+          if (!st || typeof st.selector !== "string") continue;
+          const op = st.op || (st.setText ? "setText" : (st.setHTML ? "setHTML" : undefined));
+          if (op !== "setText" && op !== "setHTML") continue;
+          let value;
+          let valueRef;
+          if (typeof st.value === "string") {
+            value = st.value;
+          } else if (typeof st.valueRef === "string") {
+            // If valueRef looks like a path (has a dot), keep as ref; else treat as literal value
+            if (st.valueRef.includes(".") || /^fields\./.test(st.valueRef)) valueRef = st.valueRef;
+            else value = st.valueRef;
+          }
+          const out: PatchStep = { selector: st.selector, op };
+          if (typeof valueRef === "string" && valueRef.length > 0) out.valueRef = valueRef;
+          else if (typeof value === "string") out.value = value;
+          else continue;
+          normalized.push(out);
+        }
+        return normalized;
+      };
+      obj.patch = normalizePatch(obj.patch);
       // Re-serialize enriched object
       const enriched = JSON.stringify(obj);
       return new Response(enriched, {
