@@ -82,7 +82,6 @@ async function callLLM(payload) {
   try {
     const approx = {
       html_excerpt_len: typeof payload?.html_excerpt === "string" ? payload.html_excerpt.length : 0,
-      has_heuristics: !!payload?.heuristics,
     };
     log("callLLM → fetch", { url: payload?.url, approx });
     const resp = await fetch(PROXY_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });

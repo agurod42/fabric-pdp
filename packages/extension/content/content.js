@@ -3,14 +3,10 @@ const api = (typeof browser !== 'undefined') ? browser : chrome;
 const DEBUG = true;
 const log = (...args) => { if (DEBUG) console.debug("[PDP][content]", ...args); };
 
-const MAX_HTML = 200000;
+const MAX_HTML = 100000;
+let __htmlWasTruncated = false;
 
-function getHeuristics() {
-  const hasPrice = !!document.querySelector('[itemprop="price"], .price, [data-price], [class*="price"]');
-  const hasAddToCart = !!document.querySelector('button[id*="cart"], button[name*="cart"], button.add-to-cart, button[type="submit"]');
-  const hasProductSchema = !!document.querySelector('script[type="application/ld+json"]');
-  return { hasPrice, hasAddToCart, hasProductSchema };
-}
+// Frontend no longer computes heuristics; LLM decides PDP.
 
 function getMeta() {
   const g = (n) => document.querySelector(`meta[property="${n}"], meta[name="${n}"]`)?.getAttribute("content") || null;
@@ -20,9 +16,51 @@ function getMeta() {
   };
 }
 
-function htmlExcerpt() {
-  const html = document.documentElement.outerHTML;
-  return html.length > MAX_HTML ? html.slice(0, MAX_HTML) : html;
+function sanitizeHtmlFromDom() {
+  try {
+    const doc = document.cloneNode(true);
+    const body = doc.body || doc.documentElement;
+    const forbidden = ['script','style','noscript','template','iframe','object','embed','svg','canvas','picture','source'];
+    forbidden.forEach(tag => Array.from(body.querySelectorAll(tag)).forEach(n => n.remove()));
+
+    // Remove comments
+    const walker = doc.createTreeWalker(body, NodeFilter.SHOW_COMMENT, null);
+    const comments = [];
+    while (walker.nextNode()) comments.push(walker.currentNode);
+    comments.forEach(c => c.parentNode && c.parentNode.removeChild(c));
+
+    // Strip dangerous attributes but keep class/id/data-*
+    const nodes = body.querySelectorAll('*');
+    nodes.forEach((el) => {
+      // Remove inline event handlers and inline style
+      Array.from(el.attributes).forEach(attr => {
+        const name = attr.name.toLowerCase();
+        if (name.startsWith('on') || name === 'style') el.removeAttribute(attr.name);
+        if (name === 'href' && /^\s*javascript:/i.test(attr.value)) el.setAttribute('href', '#');
+      });
+    });
+
+    // Include first JSON-LD Product/Offer script separately (safe text)
+    let ldjson = null;
+    try {
+      const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+      for (const s of scripts) {
+        const txt = s.textContent || '';
+        if (/("@type"\s*:\s*"(?:Product|Offer)")/i.test(txt)) { ldjson = txt.slice(0, 20000); break; }
+      }
+    } catch {}
+
+    // Serialize and minify whitespace
+    let html = (body.outerHTML || '').replace(/>\s+</g, '><').replace(/\s{2,}/g, ' ');
+    if (html.length > MAX_HTML) { __htmlWasTruncated = true; html = html.slice(0, MAX_HTML); }
+    if (ldjson) html = `<!-- PRODUCT_SCHEMA_JSON_LD -->` + ldjson + `<!-- /PRODUCT_SCHEMA_JSON_LD -->` + html;
+    return html;
+  } catch {
+    // Fallback to raw body HTML truncated
+    const raw = (document.body?.outerHTML || document.documentElement.outerHTML || '');
+    if (raw.length > MAX_HTML) { __htmlWasTruncated = true; return raw.slice(0, MAX_HTML); }
+    return raw;
+  }
 }
 
 async function main() {
@@ -37,14 +75,15 @@ async function main() {
       url,
       title: document.title,
       meta: getMeta(),
-      heuristics: getHeuristics(),
-      html_excerpt: htmlExcerpt(),
+      html_excerpt: sanitizeHtmlFromDom(),
+      html_truncated: !!__htmlWasTruncated,
       language: document.documentElement.getAttribute("lang") || navigator.language || "en"
     };
 
     const approx = {
       html_excerpt_len: typeof payload.html_excerpt === "string" ? payload.html_excerpt.length : 0,
-      heuristics: payload.heuristics,
+      // heuristics removed
+      html_truncated: payload.html_truncated,
     };
     log("send LLM_ANALYZE", approx);
     const res = await api.runtime.sendMessage({ type: "LLM_ANALYZE", payload });
