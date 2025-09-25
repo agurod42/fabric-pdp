@@ -31,7 +31,12 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const tabId = sender.tab?.id;
         if (tabId != null) {
           await api.action.setBadgeText({ text: msg.text, tabId });
-          await api.action.setBadgeBackgroundColor({ color: msg.text === "PDP" ? "#00A86B" : (msg.text === "ERR" ? "#D14343" : "#999999"), tabId });
+          const color = (msg.text === "PDP") ? "#00A86B"
+            : (msg.text === "ERR") ? "#D14343"
+            : (msg.text === "…") ? "#2B6CB0" // analyzing
+            : (msg.text === "AP") ? "#F0B429" // applying
+            : "#999999";
+          await api.action.setBadgeBackgroundColor({ color, tabId });
         }
         log("SET_BADGE", { tabId, text: msg.text });
         sendResponse({ ok: true }); return;
@@ -49,10 +54,22 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ plan }); return;
       }
       if (msg.type === "APPLY_PATCH") {
-        log("APPLY_PATCH start", { tabId: sender?.tab?.id, steps: msg?.plan?.patch?.length || 0 });
-        await api.scripting.executeScript({ target: { tabId: sender.tab.id }, func: applyPatchInPage, args: [msg.plan] });
-        log("APPLY_PATCH done");
-        sendResponse({ ok: true }); return;
+        const tabId = sender?.tab?.id;
+        const steps = msg?.plan?.patch?.length || 0;
+        const t0 = Date.now();
+        log("APPLY_PATCH start", { tabId, steps });
+        try {
+          if (tabId != null) {
+            try { await api.action.setBadgeText({ text: "AP", tabId }); await api.action.setBadgeBackgroundColor({ color: "#F0B429", tabId }); } catch {}
+          }
+          const results = await api.scripting.executeScript({ target: { tabId: sender.tab.id }, func: applyPatchInPage, args: [msg.plan] });
+          const summary = Array.isArray(results) ? (results[0]?.result ?? null) : null;
+          log("APPLY_PATCH done", { took_ms: Date.now() - t0, summary });
+          sendResponse({ ok: true, summary }); return;
+        } catch (e) {
+          console.error("[PDP][bg] APPLY_PATCH error", e);
+          sendResponse({ error: String(e) }); return;
+        }
       }
       if (msg.type === "SHOULD_RUN") {
         const cfg = await api.storage.local.get(["whitelist"]);
@@ -113,17 +130,34 @@ function applyPatchInPage(plan) {
   const log = (...args) => { try { console.debug("[PDP][apply]", ...args); } catch(_){} };
   function get(path){ return path.split(".").reduce((a,k)=>a?.[k], plan); }
   const deny = /(?:<script|javascript:|on\w+=|<iframe|<object)/i;
-  log("apply start", { steps: (plan.patch || []).length });
-  for (const step of (plan.patch || [])) {
+  const t0 = Date.now();
+  const steps = Array.isArray(plan.patch) ? plan.patch : [];
+  const results = [];
+  log("apply start", { steps: steps.length });
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    const entry = { index: i, selector: step.selector, op: step.op, valueRef: step.valueRef, status: "pending", note: "" };
     try {
       const node = document.querySelector(step.selector);
-      if (!node) { log("selector not found", step.selector); continue; }
+      if (!node) { entry.status = "skipped"; entry.note = "selector not found"; log("selector not found", step.selector); results.push(entry); continue; }
       const val = get(step.valueRef);
-      if (typeof val !== "string") { log("value not string", step.valueRef); continue; }
-      if (deny.test(val)) { log("value denied", step.valueRef); continue; }
-      if (step.op === "setText") { node.textContent = val; log("setText", step.selector); }
-      if (step.op === "setHTML") { node.innerHTML = val; log("setHTML", step.selector); }
-    } catch(e){}
+      if (typeof val !== "string") { entry.status = "skipped"; entry.note = "value not string"; log("value not string", step.valueRef); results.push(entry); continue; }
+      if (deny.test(val)) { entry.status = "skipped"; entry.note = "value denied by policy"; log("value denied", step.valueRef); results.push(entry); continue; }
+      if (step.op === "setText") { node.textContent = val; entry.status = "applied"; log("setText", step.selector); }
+      else if (step.op === "setHTML") { node.innerHTML = val; entry.status = "applied"; log("setHTML", step.selector); }
+      else { entry.status = "skipped"; entry.note = "unknown op"; log("unknown op", step.op); }
+    } catch(e){ entry.status = "error"; entry.note = String(e); }
+    results.push(entry);
   }
-  log("apply end");
+  const took_ms = Date.now() - t0;
+  const summary = {
+    steps_total: steps.length,
+    steps_applied: results.filter(r => r.status === "applied").length,
+    steps_skipped: results.filter(r => r.status === "skipped").length,
+    steps_error: results.filter(r => r.status === "error").length,
+    took_ms,
+    results,
+  };
+  log("apply end", summary);
+  return summary;
 }

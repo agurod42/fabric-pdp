@@ -55,7 +55,9 @@ async function init(){
   document.getElementById("revert").addEventListener("click", async () => {
     log("revert clicked");
     const inverse = makeInverse(plan);
+    try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "AP" }); } catch {}
     await api.runtime.sendMessage({ type: "APPLY_PATCH", plan: inverse });
+    try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "PDP" }); } catch {}
     window.close();
   });
   bindOptions();

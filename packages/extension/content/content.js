@@ -85,18 +85,22 @@ async function main() {
       // heuristics removed
       html_truncated: payload.html_truncated,
     };
-    log("send LLM_ANALYZE", approx);
-    const res = await api.runtime.sendMessage({ type: "LLM_ANALYZE", payload });
+  log("send LLM_ANALYZE", approx);
+  try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "…" }); } catch {}
+  const res = await api.runtime.sendMessage({ type: "LLM_ANALYZE", payload });
     const plan = res?.plan;
     if (!plan) throw new Error("No plan");
 
     await api.runtime.sendMessage({ type: "CACHE_PLAN", url, plan });
     log("cached plan", { is_pdp: !!plan?.is_pdp, took_ms: Date.now() - t0 });
-    await api.runtime.sendMessage({ type: "SET_BADGE", text: plan.is_pdp ? "PDP" : "—" });
+  await api.runtime.sendMessage({ type: "SET_BADGE", text: plan.is_pdp ? "PDP" : "—" });
 
     if (plan.is_pdp) {
       log("apply patch", { steps: plan?.patch?.length || 0 });
-      await api.runtime.sendMessage({ type: "APPLY_PATCH", plan });
+    try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "AP" }); } catch {}
+    const resp = await api.runtime.sendMessage({ type: "APPLY_PATCH", plan });
+    log("apply summary", resp?.summary || {});
+    try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "PDP" }); } catch {}
     }
   } catch (e) {
     console.error("[PDP][content] error", e);
