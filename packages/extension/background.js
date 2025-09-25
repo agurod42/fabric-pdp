@@ -28,15 +28,25 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     try {
       if (msg.type === "LLM_ANALYZE") {
         log("LLM_ANALYZE start", { url: msg?.payload?.url });
-        const plan = await callLLM(msg.payload);
         const tabId = sender.tab?.id;
-        if (tabId != null) {
-          const key = `plan:${tabId}`;
-          sessionCache.set(key, plan);
-          try { await cacheSet(key, plan); } catch {}
+        const errKey = (tabId != null) ? `error:${tabId}` : undefined;
+        try {
+          const plan = await callLLM(msg.payload);
+          if (tabId != null) {
+            const key = `plan:${tabId}`;
+            sessionCache.set(key, plan);
+            try { await cacheSet(key, plan); } catch {}
+            // clear any previous error for this tab
+            try { if (errKey) { sessionCache.set(errKey, ""); await cacheSet(errKey, ""); } } catch {}
+          }
+          log("LLM_ANALYZE done", { is_pdp: !!plan?.is_pdp, patch: plan?.patch?.length || 0 });
+          sendResponse({ plan }); return;
+        } catch (e) {
+          const msgStr = String(e?.message || e);
+          try { if (errKey) { sessionCache.set(errKey, msgStr); await cacheSet(errKey, msgStr); } } catch {}
+          log("LLM_ANALYZE error", { error: msgStr });
+          sendResponse({ error: msgStr }); return;
         }
-        log("LLM_ANALYZE done", { is_pdp: !!plan?.is_pdp, patch: plan?.patch?.length || 0 });
-        sendResponse({ plan }); return;
       }
       if (msg.type === "SET_BADGE") {
         const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
@@ -109,6 +119,18 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         log("GET_APPLY_SUMMARY", { key, found: !!summary });
         sendResponse({ summary }); return;
+      }
+      if (msg.type === "GET_LAST_ERROR") {
+        const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
+        const key = (tabId != null) ? `error:${tabId}` : undefined;
+        let err = key ? sessionCache.get(key) : undefined;
+        if (!err && key) {
+          err = await cacheGet(key);
+          if (err) sessionCache.set(key, err);
+        }
+        const has = typeof err === 'string' && err.trim().length > 0;
+        log("GET_LAST_ERROR", { key, has });
+        sendResponse({ error: has ? err : null }); return;
       }
       if (msg.type === "SHOULD_RUN") {
         const cfg = await api.storage.local.get(["whitelist"]);

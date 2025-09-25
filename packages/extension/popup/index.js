@@ -42,6 +42,7 @@ async function init(){
   app.innerHTML = `
     <h3>Detected PDP</h3>
     <div class="status"><small class="mono">${url}</small></div>
+    <div id="error" class="error" style="display:none"></div>
     <div id="summary" class="summary"></div>
     <div class="grid">
       ${sec("Title", plan.fields?.title)}
@@ -58,7 +59,17 @@ async function init(){
   bindOptions();
 
   // fetch latest apply summary (if any) for this tab+url
+  // also fetch any last error
   let latestSummary = null;
+  try {
+    const { error } = await api.runtime.sendMessage({ type: "GET_LAST_ERROR", url, tabId });
+    const box = document.getElementById("error");
+    if (box && error) {
+      box.style.display = "block";
+      const enc = (s) => { const d=document.createElement("div"); d.textContent=s; return d.innerHTML; };
+      box.innerHTML = `<div class="card" style="background:#FDE8E8;color:#611A15;border:1px solid #F8B4B4"><strong>Proxy error</strong><div class="mono" style="white-space:pre-wrap">${enc(String(error))}</div></div>`;
+    }
+  } catch {}
   try {
     const { summary } = await api.runtime.sendMessage({ type: "GET_APPLY_SUMMARY", url, tabId });
     const box = document.getElementById("summary");
