@@ -6,6 +6,13 @@ const DEBUG = true;
 const log = (...args) => { if (DEBUG) console.debug("[PDP][bg]", ...args); };
 
 const sessionCache = new Map();
+const storageArea = (api?.storage && api.storage.session) ? api.storage.session : api.storage.local;
+async function cacheSet(key, value) {
+  try { await storageArea.set({ [key]: value }); } catch(e) { log("cacheSet error", e?.message || e); }
+}
+async function cacheGet(key) {
+  try { const obj = await storageArea.get([key]); return obj?.[key]; } catch(e) { log("cacheGet error", e?.message || e); return undefined; }
+}
 
 api.runtime.onInstalled.addListener(() => {
   log("onInstalled");
@@ -24,6 +31,7 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const plan = await callLLM(msg.payload);
         const key = `${sender.tab?.id}|${msg.payload.url}`;
         sessionCache.set(key, plan);
+        try { await cacheSet(`plan:${key}`, plan); } catch {}
         log("LLM_ANALYZE done", { is_pdp: !!plan?.is_pdp, patch: plan?.patch?.length || 0 });
         sendResponse({ plan }); return;
       }
@@ -44,12 +52,17 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg.type === "CACHE_PLAN") {
         const key = `${sender.tab?.id}|${msg.url}`;
         sessionCache.set(key, msg.plan);
+        try { await cacheSet(`plan:${key}`, msg.plan); } catch {}
         log("CACHE_PLAN", { key });
         sendResponse({ ok: true }); return;
       }
       if (msg.type === "GET_PLAN") {
         const key = `${sender.tab?.id}|${msg.url}`;
-        const plan = sessionCache.get(key);
+        let plan = sessionCache.get(key);
+        if (!plan) {
+          plan = await cacheGet(`plan:${key}`);
+          if (plan) sessionCache.set(key, plan);
+        }
         log("GET_PLAN", { key, found: !!plan });
         sendResponse({ plan }); return;
       }
@@ -69,6 +82,7 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             const key = `summary:${sender.tab?.id}|${msg.url || ""}`;
             if (sender.tab?.id != null && typeof msg.url === "string") {
               sessionCache.set(key, summary);
+              try { await cacheSet(key, summary); } catch {}
               log("APPLY_PATCH cached summary", { key });
             }
           } catch {}
@@ -80,7 +94,11 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       if (msg.type === "GET_APPLY_SUMMARY") {
         const key = `summary:${sender.tab?.id}|${msg.url}`;
-        const summary = sessionCache.get(key);
+        let summary = sessionCache.get(key);
+        if (!summary) {
+          summary = await cacheGet(key);
+          if (summary) sessionCache.set(key, summary);
+        }
         log("GET_APPLY_SUMMARY", { key, found: !!summary });
         sendResponse({ summary }); return;
       }
