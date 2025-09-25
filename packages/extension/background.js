@@ -88,7 +88,7 @@ async function callLLM(payload) {
     log("callLLM ← response", { status: resp.status, took_ms: Date.now() - t0 });
     const txt = await resp.text();
     let plan; try { plan = JSON.parse(txt) } catch (e) {
-      log("callLLM parse error", { took_ms: Date.now() - t0, text_len: txt.length, snippet: txt.slice(0, 120) });
+      log("callLLM parse error", { took_ms: Date.now() - t0, text_len: txt.length, snippet: txt });
       throw new Error("LLM returned non-JSON");
     }
     if (!plan || typeof plan.is_pdp !== "boolean") {

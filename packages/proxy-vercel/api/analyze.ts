@@ -82,11 +82,13 @@ Rules:
       { role: "user", content: JSON.stringify(payload) }
     ];
 
+    const maxTokensEnv = Number(process.env.LLM_MAX_TOKENS || "");
+    const MAX_TOKENS = Number.isFinite(maxTokensEnv) && maxTokensEnv > 0 ? Math.min(Math.floor(maxTokensEnv), 32000) : 5000;
     const resp = await oai.chat.completions.create({
       model: "gpt-4o-mini",
       messages,
       temperature: 0.2,
-      max_tokens: 500,
+      max_tokens: MAX_TOKENS,
       response_format: { type: "json_object" }
     });
 
