@@ -44,13 +44,13 @@ export default async function handler(req) {
       evidence: ["vercel-mock (no OPENAI_API_KEY)"],
       fields: isPdp ? {
         title: { selector: "h1", original: title || "", proposed: "Premium Product — Reinvented", html: false },
-        description: { selector: ".product-description, main", original: "", proposed: "<p>This is a mock rewrite. Add OPENAI_API_KEY in Vercel to enable real output.</p>", html: true },
+        description: { selector: ".product-description", original: "", proposed: "<p>This is a mock rewrite. Add OPENAI_API_KEY in Vercel to enable real output.</p>", html: true },
         shipping: { selector: ".shipping, .policy-shipping", original: "", proposed: "<ul><li>Free shipping over $50</li><li>2–5 business days</li></ul>", html: true },
         returns: { selector: ".returns, .policy-returns", original: "", proposed: "<ul><li>30-day returns</li><li>Prepaid label</li></ul>", html: true }
       } : {},
       patch: isPdp ? [
         { selector: "h1", op: "setText", valueRef: "fields.title.proposed" },
-        { selector: ".product-description, main", op: "setHTML", valueRef: "fields.description.proposed" }
+        { selector: ".product-description", op: "setHTML", valueRef: "fields.description.proposed" }
       ] : []
     });
   }
@@ -74,6 +74,12 @@ Rules:
 - Determine if the page is a merchant Product Detail Page.
 - If is_pdp=true, extract title/description/shipping/returns + selectors where found.
 - Propose improved content: title <= 70 chars; description 120–200 words; shipping/returns 3–6 bullets each.
+- For each field, choose the MOST SPECIFIC, STABLE selector that uniquely targets the exact element in the provided html_excerpt:
+  - Prefer #id or a short descendant path like 'main h1#title' or '.product-main h1.product-title'.
+  - Avoid generic tags alone ('h1', 'main', 'body') unless they are unique in the provided html.
+  - Do NOT use grouped selectors with commas, wildcards '*', or overly broad containers.
+  - Ensure the selector would match EXACTLY ONE element in the provided html_excerpt. If multiple elements match, refine it with classes/ids/ancestor.
+  - Include selector diagnostics in output where possible (e.g., fields.title.selector_note: 'unique in excerpt').
 - Build a patch array with objects of the form { selector, op: "setText"|"setHTML", valueRef?: string, value?: string }. Prefer valueRef pointing to proposed fields (e.g., "fields.title.proposed"). Use value only if you cannot reference a field.
 - Do not include scripts or external links. Keep HTML minimal (<p>, <ul>, <li>, <strong>, <em>).`;
 
