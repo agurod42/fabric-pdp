@@ -141,7 +141,6 @@ async function callLLM(payload) {
     };
     log("callLLM → fetch", { url: payload?.url, approx });
     const resp = await fetch(PROXY_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    console.log("resp", resp);
     const plan = await resp.json();
     log("callLLM ← response", { status: resp.status, took_ms: Date.now() - t0, plan });
     if (!plan || typeof plan.is_pdp !== "boolean") {
@@ -149,20 +148,8 @@ async function callLLM(payload) {
       throw new Error("Invalid plan schema");
     }
     const deny = /(?:<script|javascript:|on\w+=|<iframe|<object|fetch\(|XMLHttpRequest|WebSocket|eval|Function|import\(|window\.|document\.write|chrome\.|browser\.)/i;
-    // Normalize patch steps from proxy (supports { op } or { setText/setHTML } and literal values)
-    const normalizePatch = (arr) => {
-      if (!Array.isArray(arr)) return [];
-      return arr.map((st) => {
-        if (!st || typeof st.selector !== "string") return null;
-        const op = st.op || (st.setText ? "setText" : (st.setHTML ? "setHTML" : undefined));
-        if (!op || !["setText", "setHTML"].includes(op)) return null;
-        const normalized = { selector: st.selector, op };
-        if (typeof st.value === "string") normalized.value = st.value;
-        if (typeof st.valueRef === "string") normalized.valueRef = st.valueRef;
-        return normalized;
-      }).filter(Boolean);
-    };
-    plan.patch = normalizePatch(plan.patch);
+    // Minimal validation: ensure array and allowed ops
+    plan.patch = Array.isArray(plan.patch) ? plan.patch.filter(st => st && typeof st.selector === "string" && ["setText","setHTML"].includes(st.op)) : [];
     for (const k of ["title","description","shipping","returns"]) {
       const f = plan.fields?.[k];
       if (f && typeof f.proposed === "string" && deny.test(f.proposed)) f.proposed = "";
