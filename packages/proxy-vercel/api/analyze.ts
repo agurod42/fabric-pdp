@@ -97,22 +97,22 @@ Rules:
         });
       } catch {}
 
-      const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || "https://ai.thewisemonkey.co.uk/ollama";
-      const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2";
-      const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "";
+      const OPENAI_BASE = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
+      const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
+      const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 
       try {
         console.debug("[PDP][api] llm config", {
           traceId,
-          base: OLLAMA_BASE,
-          model: OLLAMA_MODEL,
-          api_key_present: !!OLLAMA_API_KEY,
+          base: OPENAI_BASE,
+          model: OPENAI_MODEL,
+          api_key_present: !!OPENAI_API_KEY,
           msg_lens: messages.map(m => (typeof m?.content === "string" ? m.content.length : 0)),
         });
       } catch {}
 
-      if (!OLLAMA_API_KEY) {
-        await writer.write(encoder.encode(JSON.stringify({ error: "Server misconfiguration: OLLAMA_API_KEY is required" })));
+      if (!OPENAI_API_KEY) {
+        await writer.write(encoder.encode(JSON.stringify({ error: "Server misconfiguration: OPENAI_API_KEY is required" })));
         await writer.close();
         return;
       }
@@ -120,17 +120,18 @@ Rules:
       const tFetchStart = Date.now();
       const headersInit: Record<string, string> = {
         "content-type": "application/json",
-        Authorization: `Bearer ${OLLAMA_API_KEY}`,
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
       };
       if (traceId) headersInit["x-trace-id"] = traceId;
-      const resp = await fetch(`${OLLAMA_BASE}/api/chat`, {
+      const resp = await fetch(`${OPENAI_BASE}/chat/completions`, {
         method: "POST",
         headers: headersInit,
         body: JSON.stringify({
-          model: OLLAMA_MODEL,
+          model: OPENAI_MODEL,
           messages,
+          temperature: 0,
           stream: false,
-          options: { temperature: 0 }
+          response_format: { type: "json_object" },
         })
       });
       try {
@@ -145,16 +146,16 @@ Rules:
       if (!resp.ok) {
         let errTxt = "";
         try { errTxt = await resp.text(); } catch {}
-        throw new Error(`Ollama error ${resp.status}: ${errTxt || resp.statusText || "no body"}`);
+        throw new Error(`OpenAI error ${resp.status}: ${errTxt || resp.statusText || "no body"}`);
       }
-      const ollama = await resp.json();
-      const txt = (ollama?.message?.content ?? "").trim() || "{}";
+      const openai = await resp.json();
+      const txt = (openai?.choices?.[0]?.message?.content ?? "").trim() || "{}";
       try {
         console.debug("[PDP][api] llm raw response", {
           traceId,
-          model: OLLAMA_MODEL,
-          message_len: typeof (ollama?.message?.content) === "string" ? ollama.message.content.length : 0,
-          preview: typeof (ollama?.message?.content) === "string" ? ollama.message.content : "",
+          model: OPENAI_MODEL,
+          message_len: typeof (openai?.choices?.[0]?.message?.content) === "string" ? openai.choices[0].message.content.length : 0,
+          preview: typeof (openai?.choices?.[0]?.message?.content) === "string" ? openai.choices[0].message.content : "",
         });
       } catch {}
       const start = txt.indexOf("{");
