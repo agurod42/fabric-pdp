@@ -37,20 +37,33 @@ async function init(){
   } catch {}
 
   const renderFieldDiff = (key, label) => {
-    const f = plan.fields?.[key];
-    if (!f || !f.selector) return "";
-    const selector = enc(f.selector);
+    const f = plan.fields?.[key] || {};
+    const hasSelector = typeof f.selector === 'string' && f.selector.length > 0;
+    const selector = hasSelector ? enc(f.selector) : '<span style="color:#6b7280">(no selector)</span>';
     const allowHTML = !!f.html;
+    // If no selector, only show label + selector note, skip prev/current panes
+    if (!hasSelector) {
+      return `
+      <div class="diff-item">
+        <div class="label">${label}</div>
+        <div class="selector"><small class="mono">${selector}</small></div>
+      </div>
+      `;
+    }
     const prev = typeof f.original === 'string' ? f.original : '';
-    // Prefer applied value from summary (post-patch), else fall back to proposed
+    // Prefer applied value from summary (post-patch), else fall back to proposed/top-level
     let applied = '';
     try {
-      if (latestSummary && Array.isArray(latestSummary.results)) {
+      if (hasSelector && latestSummary && Array.isArray(latestSummary.results)) {
         const r = latestSummary.results.find(r => r && r.status === 'applied' && r.selector === f.selector && typeof r.value === 'string');
         if (r && typeof r.value === 'string') applied = r.value;
       }
     } catch {}
-    const curr = (typeof applied === 'string' && applied.length > 0) ? applied : (typeof f.proposed === 'string' ? f.proposed : '');
+    let curr = '';
+    if (typeof applied === 'string' && applied.length > 0) curr = applied;
+    else if (typeof f.proposed === 'string') curr = f.proposed;
+    else if (typeof plan[key] === 'string') curr = plan[key];
+
     const prevHtml = allowHTML ? prev : enc(prev);
     const currHtml = allowHTML ? curr : enc(curr);
     return `
