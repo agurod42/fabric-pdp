@@ -1,6 +1,4 @@
 export const config = { runtime: "edge" };
-import OpenAI from "openai";
-import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -51,29 +49,6 @@ export default async function handler(req) {
       // Send an initial whitespace byte so the platform receives a response within the limit
       await writer.write(encoder.encode(" "));
 
-      const openaiKey = process.env.OPENAI_API_KEY;
-      if (!openaiKey) {
-        console.warn("[PDP][api] OPENAI_API_KEY not set; returning mock response");
-        const isPdp = /buy|cart|add to cart|product|sku|variant/i.test(String(title || ""));
-        const body = {
-          is_pdp: !!isPdp,
-          evidence: ["vercel-mock (no OPENAI_API_KEY)"],
-          fields: isPdp ? {
-            title: { selector: "h1", original: title || "", proposed: "Premium Product — Reinvented", html: false },
-            description: { selector: ".product-description", original: "", proposed: "<p>This is a mock rewrite. Add OPENAI_API_KEY in Vercel to enable real output.</p>", html: true },
-            shipping: { selector: ".shipping, .policy-shipping", original: "", proposed: "<ul><li>Free shipping over $50</li><li>2–5 business days</li></ul>", html: true },
-            returns: { selector: ".returns, .policy-returns", original: "", proposed: "<ul><li>30-day returns</li><li>Prepaid label</li></ul>", html: true }
-          } : {},
-          patch: isPdp ? [
-            { selector: "h1", op: "setText", valueRef: "fields.title.proposed" },
-            { selector: ".product-description", op: "setHTML", valueRef: "fields.description.proposed" }
-          ] : []
-        };
-        await writer.write(encoder.encode(JSON.stringify(body)));
-        await writer.close();
-        return;
-      }
-
       // Server-side truncation and payload slimming
       const safe = (s: any) => (typeof s === "string" ? s : "");
       const payload = {
@@ -84,7 +59,6 @@ export default async function handler(req) {
         html_excerpt: safe(html_excerpt),
       };
 
-      const oai = new OpenAI({ apiKey: openaiKey, baseURL: "https://ai.thewisemonkey.co.uk/api/v1" });
       const SYS_PROMPT = `You are a careful extractor. Output STRICT JSON only, matching the schema.
 Rules:
 - Determine if the page is a merchant Product Detail Page.
@@ -99,23 +73,33 @@ Rules:
 - Build a patch array with objects of the form { selector, op: "setText"|"setHTML", valueRef?: string, value?: string }. Prefer valueRef pointing to proposed fields (e.g., "fields.title.proposed"). Use value only if you cannot reference a field.
 - Do not include scripts or external links. Keep HTML minimal (<p>, <ul>, <li>, <strong>, <em>).`;
 
-      const messages: ChatCompletionMessageParam[] = [
+      const messages = [
         { role: "system", content: SYS_PROMPT },
         { role: "user", content: JSON.stringify(payload) }
       ];
 
       const maxTokensEnv = Number(process.env.LLM_MAX_TOKENS || "");
-      const MAX_TOKENS = Number.isFinite(maxTokensEnv) && maxTokensEnv > 0 ? Math.min(Math.floor(maxTokensEnv), 32000) : 5000;
-      const model = "gpt-oss";
-      const resp = await oai.chat.completions.create({
-        model,
-        messages,
-        temperature: 0,
-        max_tokens: MAX_TOKENS,
-        response_format: { type: "json_object" }
-      });
+      const NUM_PREDICT = Number.isFinite(maxTokensEnv) && maxTokensEnv > 0 ? Math.min(Math.floor(maxTokensEnv), 32000) : 1024;
+      const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || "https://ai.thewisemonkey.co.uk/ollama";
+      const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.1";
 
-      const txt = resp.choices?.[0]?.message?.content?.trim() || "{}";
+      const resp = await fetch(`${OLLAMA_BASE}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: OLLAMA_MODEL,
+          messages,
+          stream: false,
+          options: { temperature: 0, num_predict: NUM_PREDICT }
+        })
+      });
+      if (!resp.ok) {
+        let errTxt = "";
+        try { errTxt = await resp.text(); } catch {}
+        throw new Error(`Ollama error ${resp.status}: ${errTxt || resp.statusText || "no body"}`);
+      }
+      const ollama = await resp.json();
+      const txt = (ollama?.message?.content ?? "").trim() || "{}";
       const start = txt.indexOf("{");
       const end = txt.lastIndexOf("}");
       const raw = txt.slice(start, end + 1);
