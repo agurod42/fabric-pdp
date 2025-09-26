@@ -81,11 +81,21 @@ Rules:
       const maxTokensEnv = Number(process.env.LLM_MAX_TOKENS || "");
       const NUM_PREDICT = Number.isFinite(maxTokensEnv) && maxTokensEnv > 0 ? Math.min(Math.floor(maxTokensEnv), 32000) : 1024;
       const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || "https://ai.thewisemonkey.co.uk/ollama";
-      const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.1";
+      const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gpt-oss";
+      const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "";
+
+      if (!OLLAMA_API_KEY) {
+        await writer.write(encoder.encode(JSON.stringify({ error: "Server misconfiguration: OLLAMA_API_KEY is required" })));
+        await writer.close();
+        return;
+      }
 
       const resp = await fetch(`${OLLAMA_BASE}/api/chat`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${OLLAMA_API_KEY}`,
+        },
         body: JSON.stringify({
           model: OLLAMA_MODEL,
           messages,
