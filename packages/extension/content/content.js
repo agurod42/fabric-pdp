@@ -84,7 +84,12 @@ async function main() {
   try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "…" }); } catch {}
   const res = await api.runtime.sendMessage({ type: "LLM_ANALYZE", payload });
     let plan = res?.plan;
-    if (!plan) throw new Error("No plan");
+    if (!plan) {
+      const backendError = (typeof res?.error === 'string' && res.error.trim().length > 0) ? res.error : "No plan";
+      // Propagate real backend error to background so popup can display it
+      try { await api.runtime.sendMessage({ type: "SET_LAST_ERROR", error: String(backendError) }); } catch {}
+      throw new Error(String(backendError));
+    }
 
     // Enrich plan with DOM originals if missing, to improve popup and revert accuracy
     try {
