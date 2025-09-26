@@ -84,7 +84,7 @@ export default async function handler(req) {
         html_excerpt: safe(html_excerpt),
       };
 
-      const oai = new OpenAI({ apiKey: openaiKey, baseURL: "https://ai.thewisemonkey.co.uk/api" });
+      const oai = new OpenAI({ apiKey: openaiKey, baseURL: "https://ai.thewisemonkey.co.uk/api/v1" });
       const SYS_PROMPT = `You are a careful extractor. Output STRICT JSON only, matching the schema.
 Rules:
 - Determine if the page is a merchant Product Detail Page.
