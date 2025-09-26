@@ -171,18 +171,40 @@ function patternToRegex(pattern) {
   return "^" + pattern.replace(/\./g,"\\.").replace(/\*/g,".*") + "$";
 }
 
+function makeTraceId() {
+  try {
+    const arr = new Uint8Array(8);
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      crypto.getRandomValues(arr);
+    } else {
+      for (let i = 0; i < arr.length; i++) arr[i] = Math.floor(Math.random() * 256);
+    }
+    const hex = Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+    return `pdp-${hex}`;
+  } catch {
+    return `pdp-${Date.now().toString(16)}`;
+  }
+}
+
 async function callLLM(payload) {
   const t0 = Date.now();
+  const traceId = makeTraceId();
   try {
     const approx = {
       html_excerpt_len: typeof payload?.html_excerpt === "string" ? payload.html_excerpt.length : 0,
     };
-    log("callLLM → fetch", { url: payload?.url, approx });
-    const resp = await fetch(PROXY_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    const plan = await resp.json();
-    log("callLLM ← response", { status: resp.status, took_ms: Date.now() - t0, plan });
+    log("callLLM → fetch", { traceId, url: payload?.url, approx });
+    const body = JSON.stringify({ ...payload, trace_id: traceId });
+    const resp = await fetch(PROXY_URL, { method: "POST", headers: { "Content-Type": "application/json", "x-trace-id": traceId }, body });
+    const text = await resp.text();
+    let plan;
+    try { plan = JSON.parse(text); } catch(e) {
+      log("callLLM parse error", { traceId, error: String(e?.message || e), text_len: text?.length || 0 });
+      throw e;
+    }
+    log("callLLM ← response", { traceId, status: resp.status, took_ms: Date.now() - t0, bytes: text?.length || 0, keys: Object.keys(plan || {}) });
     if (!plan || typeof plan.is_pdp !== "boolean") {
-      log("callLLM schema invalid", { keys: Object.keys(plan || {}) });
+      log("callLLM schema invalid", { traceId, keys: Object.keys(plan || {}) });
       throw new Error("Invalid plan schema");
     }
     const deny = /(?:<script|javascript:|on\w+=|<iframe|<object|fetch\(|XMLHttpRequest|WebSocket|eval|Function|import\(|window\.|document\.write|chrome\.|browser\.)/i;
@@ -192,10 +214,10 @@ async function callLLM(payload) {
       const f = plan.fields?.[k];
       if (f && typeof f.proposed === "string" && deny.test(f.proposed)) f.proposed = "";
     }
-    log("callLLM parsed", { is_pdp: plan.is_pdp, patch: plan.patch.length, took_ms: Date.now() - t0 });
+    log("callLLM parsed", { traceId, is_pdp: plan.is_pdp, patch: plan.patch.length, took_ms: Date.now() - t0 });
     return plan;
   } catch (e) {
-    console.error("[PDP][bg] callLLM error", e);
+    console.error("[PDP][bg] callLLM error", { traceId, error: e });
     throw e;
   }
 }
