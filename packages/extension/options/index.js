@@ -3,13 +3,25 @@ const api = (typeof browser !== 'undefined') ? browser : chrome;
 const DEBUG = true;
 const log = (...args) => { if (DEBUG) console.debug("[PDP][options]", ...args); };
 
-async function load(){
-  log("load whitelist");
-  const cfg = await api.storage.local.get(["whitelist"]);
-  const wl = cfg?.whitelist || [];
-  render(wl);
+const STRATEGIES = [
+  { id: "llmStrategy", label: "LLM Strategy" },
+];
+
+function fillStrategySelect(selectEl){
+  if (!selectEl) return;
+  selectEl.innerHTML = STRATEGIES.map(s => `<option value="${s.id}">${s.label}</option>`).join("");
 }
-function render(wl){
+
+async function load(){
+  log("load settings");
+  const cfg = await api.storage.local.get(["whitelist","strategySettings"]);
+  const wl = cfg?.whitelist || [];
+  const s = cfg?.strategySettings || { global: "llmStrategy", perDomain: [] };
+  renderWhitelist(wl);
+  renderStrategies(s);
+}
+
+function renderWhitelist(wl){
   const list = document.getElementById("list");
   list.innerHTML = "";
   wl.forEach((h, idx)=>{
@@ -25,7 +37,35 @@ function render(wl){
       const wl2 = cfg?.whitelist || [];
       wl2.splice(i,1);
       await api.storage.local.set({ whitelist: wl2 });
-      render(wl2);
+      renderWhitelist(wl2);
+    });
+  });
+}
+
+function renderStrategies(s){
+  fillStrategySelect(document.getElementById("globalStrategy"));
+  fillStrategySelect(document.getElementById("domainStrategy"));
+  const g = document.getElementById("globalStrategy");
+  if (g) g.value = s.global || "llmStrategy";
+
+  const list = document.getElementById("overrides");
+  list.innerHTML = "";
+  (Array.isArray(s.perDomain) ? s.perDomain : []).forEach((o, idx)=>{
+    const st = STRATEGIES.find(x => x.id === o.strategyId);
+    const label = st ? st.label : o.strategyId;
+    const li = document.createElement("li");
+    li.innerHTML = `<code>${o.pattern}</code> → <code>${label}</code> <button data-i="${idx}">Remove</button>`;
+    list.appendChild(li);
+  });
+  list.querySelectorAll("button[data-i]").forEach(btn => {
+    btn.addEventListener("click", async (e)=>{
+      const i = parseInt(e.target.getAttribute("data-i"), 10);
+      const cfg = await api.storage.local.get(["strategySettings"]);
+      const s = cfg?.strategySettings || { global: "llmStrategy", perDomain: [] };
+      const arr = Array.isArray(s.perDomain) ? s.perDomain : [];
+      arr.splice(i,1);
+      await api.storage.local.set({ strategySettings: { ...s, perDomain: arr } });
+      renderStrategies({ ...s, perDomain: arr });
     });
   });
 }
@@ -39,12 +79,42 @@ document.getElementById("add").addEventListener("click", async ()=>{
   if (!wl.includes(host)) wl.push(host);
   await api.storage.local.set({ whitelist: wl });
   document.getElementById("host").value = "";
-  render(wl);
+  renderWhitelist(wl);
 });
 document.getElementById("clear").addEventListener("click", async ()=>{
   log("clear whitelist");
   await api.storage.local.set({ whitelist: [] });
-  render([]);
+  renderWhitelist([]);
 });
+
+document.getElementById("saveGlobal").addEventListener("click", async ()=>{
+  const select = document.getElementById("globalStrategy");
+  const id = select ? select.value : "llmStrategy";
+  const cfg = await api.storage.local.get(["strategySettings"]);
+  const s = cfg?.strategySettings || { global: "llmStrategy", perDomain: [] };
+  await api.storage.local.set({ strategySettings: { ...s, global: id } });
+  renderStrategies({ ...s, global: id });
+});
+
+document.getElementById("addOverride").addEventListener("click", async ()=>{
+  const pattern = document.getElementById("pattern").value.trim();
+  const strategyId = document.getElementById("domainStrategy").value;
+  if (!pattern) return;
+  const cfg = await api.storage.local.get(["strategySettings"]);
+  const s = cfg?.strategySettings || { global: "llmStrategy", perDomain: [] };
+  const list = Array.isArray(s.perDomain) ? s.perDomain : [];
+  list.push({ pattern, strategyId });
+  await api.storage.local.set({ strategySettings: { ...s, perDomain: list } });
+  document.getElementById("pattern").value = "";
+  renderStrategies({ ...s, perDomain: list });
+});
+
+document.getElementById("clearOverrides").addEventListener("click", async ()=>{
+  const cfg = await api.storage.local.get(["strategySettings"]);
+  const s = cfg?.strategySettings || { global: "llmStrategy", perDomain: [] };
+  await api.storage.local.set({ strategySettings: { ...s, perDomain: [] } });
+  renderStrategies({ ...s, perDomain: [] });
+});
+
 log("options loaded");
 load();

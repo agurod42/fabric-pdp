@@ -14,10 +14,26 @@ async function cacheGet(key) {
   try { const obj = await storageArea.get([key]); return obj?.[key]; } catch(e) { log("cacheGet error", e?.message || e); return undefined; }
 }
 
+const STRATEGY_DEFAULT_ID = "llmStrategy";
+const STRATEGY_REGISTRY = {
+  // Strategy ID: resolver function. Signature: (payload, ctx) => Promise<plan>
+  llmStrategy: async (payload /*, ctx */) => {
+    return await callLLM(payload);
+  },
+};
+
 api.runtime.onInstalled.addListener(() => {
   log("onInstalled");
   api.storage.local.get(["whitelist"]).then(cfg => {
     if (!cfg || !Array.isArray(cfg.whitelist)) api.storage.local.set({ whitelist: [] });
+  });
+  // Initialize strategy settings on first install
+  api.storage.local.get(["strategySettings"]).then(cfg => {
+    const s = cfg?.strategySettings;
+    if (!s || typeof s !== 'object') {
+      const defaults = { global: STRATEGY_DEFAULT_ID, perDomain: [] };
+      api.storage.local.set({ strategySettings: defaults });
+    }
   });
   api.action.setBadgeBackgroundColor({ color: "#00A86B" });
 });
@@ -27,26 +43,17 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     try {
       if (msg.type === "LLM_ANALYZE") {
-        log("LLM_ANALYZE start", { url: msg?.payload?.url });
+        // Backward compatibility: route to new resolver using configured strategy
         const tabId = sender.tab?.id;
-        const errKey = (tabId != null) ? `error:${tabId}` : undefined;
-        try {
-          const plan = await callLLM(msg.payload);
-          if (tabId != null) {
-            const key = `plan:${tabId}`;
-            sessionCache.set(key, plan);
-            try { await cacheSet(key, plan); } catch {}
-            // clear any previous error for this tab
-            try { if (errKey) { sessionCache.set(errKey, ""); await cacheSet(errKey, ""); } } catch {}
-          }
-          log("LLM_ANALYZE done", { is_pdp: !!plan?.is_pdp, patch: plan?.patch?.length || 0 });
-          sendResponse({ plan }); return;
-        } catch (e) {
-          const msgStr = String(e?.message || e);
-          try { if (errKey) { sessionCache.set(errKey, msgStr); await cacheSet(errKey, msgStr); } } catch {}
-          log("LLM_ANALYZE error", { error: msgStr });
-          sendResponse({ error: msgStr }); return;
-        }
+        const { plan, error } = await resolvePlanWithStrategy(msg.payload, tabId);
+        if (error) { sendResponse({ error }); return; }
+        sendResponse({ plan }); return;
+      }
+      if (msg.type === "RESOLVE_PLAN") {
+        const tabId = sender.tab?.id;
+        const { plan, error } = await resolvePlanWithStrategy(msg.payload, tabId);
+        if (error) { sendResponse({ error }); return; }
+        sendResponse({ plan }); return;
       }
       if (msg.type === "SET_BADGE") {
         const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
@@ -159,6 +166,59 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   })();
   return true;
 });
+
+async function getStrategySettings(){
+  try {
+    const cfg = await api.storage.local.get(["strategySettings"]);
+    const s = cfg?.strategySettings;
+    if (!s || typeof s !== 'object') return { global: STRATEGY_DEFAULT_ID, perDomain: [] };
+    const perDomain = Array.isArray(s.perDomain) ? s.perDomain.filter(e => e && typeof e.pattern === 'string' && typeof e.strategyId === 'string') : [];
+    const global = typeof s.global === 'string' && s.global ? s.global : STRATEGY_DEFAULT_ID;
+    return { global, perDomain };
+  } catch {
+    return { global: STRATEGY_DEFAULT_ID, perDomain: [] };
+  }
+}
+
+function chooseStrategyIdForUrl(urlStr, settings){
+  const urlHost = safeHostname(urlStr);
+  // Find first matching per-domain pattern
+  for (const entry of settings.perDomain) {
+    try {
+      const re = new RegExp(patternToRegex(entry.pattern));
+      if (re.test(urlHost)) return entry.strategyId;
+    } catch {}
+  }
+  return settings.global || STRATEGY_DEFAULT_ID;
+}
+
+function safeHostname(urlStr){
+  try { return new URL(urlStr).hostname; } catch { return ""; }
+}
+
+async function resolvePlanWithStrategy(payload, tabId){
+  log("RESOLVE_PLAN start", { url: payload?.url });
+  const errKey = (tabId != null) ? `error:${tabId}` : undefined;
+  try {
+    const settings = await getStrategySettings();
+    const strategyId = chooseStrategyIdForUrl(payload?.url || "", settings);
+    const resolver = STRATEGY_REGISTRY[strategyId] || STRATEGY_REGISTRY[STRATEGY_DEFAULT_ID];
+    const plan = await resolver(payload, { strategyId });
+    if (tabId != null) {
+      const key = `plan:${tabId}`;
+      sessionCache.set(key, plan);
+      try { await cacheSet(key, plan); } catch {}
+      try { if (errKey) { sessionCache.set(errKey, ""); await cacheSet(errKey, ""); } } catch {}
+    }
+    log("RESOLVE_PLAN done", { is_pdp: !!plan?.is_pdp, patch: plan?.patch?.length || 0 });
+    return { plan };
+  } catch (e) {
+    const msgStr = String(e?.message || e);
+    try { if (errKey) { sessionCache.set(errKey, msgStr); await cacheSet(errKey, msgStr); } } catch {}
+    log("RESOLVE_PLAN error", { error: msgStr });
+    return { error: msgStr };
+  }
+}
 
 function shouldRun(urlStr, wl) {
   if (!Array.isArray(wl) || wl.length === 0) return true;

@@ -78,9 +78,9 @@ async function main() {
       html_excerpt_len: typeof payload.html_excerpt === "string" ? payload.html_excerpt.length : 0,
       // heuristics removed
     };
-  log("send LLM_ANALYZE", approx);
+  log("send RESOLVE_PLAN", approx);
   try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "…" }); } catch {}
-  const res = await api.runtime.sendMessage({ type: "LLM_ANALYZE", payload });
+  const res = await api.runtime.sendMessage({ type: "RESOLVE_PLAN", payload });
     let plan = res?.plan;
     if (!plan) {
       const backendError = (typeof res?.error === 'string' && res.error.trim().length > 0) ? res.error : "No plan";

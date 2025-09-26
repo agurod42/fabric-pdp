@@ -18,7 +18,25 @@
   </head>
   <body>
     <h2>PDP Rewriter — Settings</h2>
-    <p class="tip">Whitelist hostnames to restrict where the extension runs. Leave empty to allow <strong>all sites</strong>. Wildcards supported, e.g. <code>*.shopify.com</code>, <code>amazon.com</code>.</p>
+    <p class="tip">Choose a strategy and optionally whitelist hostnames. Leave whitelist empty to allow <strong>all sites</strong>. Wildcards supported, e.g. <code>*.shopify.com</code>, <code>amazon.com</code>.</p>
+    <h3>Global strategy</h3>
+    <div class="row">
+      <select id="globalStrategy" style="flex:1">
+        <option value="llmStrategy">LLM Strategy</option>
+      </select>
+      <button id="saveGlobal">Save</button>
+    </div>
+    <h3>Per-domain strategy overrides</h3>
+    <div class="row">
+      <input id="pattern" placeholder="e.g. *.shopify.com" style="flex:1"/>
+      <select id="domainStrategy">
+        <option value="llmStrategy">LLM Strategy</option>
+      </select>
+      <button id="addOverride">Add Override</button>
+      <button id="clearOverrides">Clear Overrides</button>
+    </div>
+    <ul id="overrides"></ul>
+    <h3>Whitelist</h3>
     <div class="row">
       <input id="host" placeholder="e.g. *.shopify.com" style="flex:1"/>
       <button id="add">Add</button>
