@@ -100,7 +100,7 @@ Rules:
       const maxTokensEnv = Number(process.env.LLM_MAX_TOKENS || "");
       const NUM_PREDICT = Number.isFinite(maxTokensEnv) && maxTokensEnv > 0 ? Math.min(Math.floor(maxTokensEnv), 32000) : 1024;
       const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || "https://ai.thewisemonkey.co.uk/ollama";
-      const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gpt-oss:120b";
+      const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5:7b-instruct";
       const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "";
 
       try {
