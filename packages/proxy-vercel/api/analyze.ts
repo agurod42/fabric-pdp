@@ -152,6 +152,14 @@ Rules:
       }
       const ollama = await resp.json();
       const txt = (ollama?.message?.content ?? "").trim() || "{}";
+      try {
+        console.debug("[PDP][api] llm raw response", {
+          traceId,
+          model: OLLAMA_MODEL,
+          message_len: typeof (ollama?.message?.content) === "string" ? ollama.message.content.length : 0,
+          preview: typeof (ollama?.message?.content) === "string" ? ollama.message.content : "",
+        });
+      } catch {}
       const start = txt.indexOf("{");
       const end = txt.lastIndexOf("}");
       const raw = txt.slice(start, end + 1);
