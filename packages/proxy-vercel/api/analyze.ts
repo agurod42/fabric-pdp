@@ -109,16 +109,14 @@ Rules:
 
       const maxTokensEnv = Number(process.env.LLM_MAX_TOKENS || "");
       const MAX_TOKENS = Number.isFinite(maxTokensEnv) && maxTokensEnv > 0 ? Math.min(Math.floor(maxTokensEnv), 32000) : 5000;
-      const model = process.env.LLM_MODEL || "gpt-5";
-      const params: any = {
+      const model = process.env.LLM_MODEL || "gpt-4";
+      const resp = await oai.chat.completions.create({
         model,
         messages,
-        temperature: 1,
+        temperature: 0.2,
+        max_tokens: MAX_TOKENS,
         response_format: { type: "json_object" }
-      };
-      // Newer models (e.g., gpt-5, gpt-4o family) require max_completion_tokens
-      if (/(gpt-5|gpt-4o|o3|o4)/i.test(model)) params.max_completion_tokens = MAX_TOKENS; else params.max_tokens = MAX_TOKENS;
-      const resp = await oai.chat.completions.create(params);
+      });
 
       const txt = resp.choices?.[0]?.message?.content?.trim() || "{}";
       const start = txt.indexOf("{");
