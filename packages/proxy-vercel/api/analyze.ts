@@ -98,7 +98,7 @@ Rules:
       } catch {}
 
       const OPENAI_BASE = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-      const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
+      const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4.1";
       const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 
       try {
