@@ -110,13 +110,13 @@ async function init(){
       </div>
       <div id="actionsRight" class="right actions icons" style="display:none">
         <button id="saveHtml" class="icon-btn" title="Save reduced HTML" aria-label="Save reduced HTML">
-          <span class="icon" data-icon="download"></span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3a1 1 0 011 1v8.59l2.3-2.3a1 1 0 011.4 1.42l-4 4a1 1 0 01-1.4 0l-4-4a1 1 0 111.4-1.42L11 12.59V4a1 1 0 011-1zM5 17a1 1 0 100 2h14a1 1 0 100-2H5z"/></svg>
         </button>
         <button id="revert" class="icon-btn" title="Revert" aria-label="Revert" disabled>
-          <span class="icon" data-icon="undo"></span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M9.53 2.47a.75.75 0 010 1.06L6.06 7H15a6 6 0 010 12h-3a.75.75 0 010-1.5h3a4.5 4.5 0 000-9H6.06l3.47 3.47a.75.75 0 11-1.06 1.06l-4.75-4.75a.75.75 0 010-1.06l4.75-4.75a.75.75 0 011.06 0z"/></svg>
         </button>
         <button id="reapply" class="icon-btn" title="Re-apply" aria-label="Re-apply" disabled>
-          <span class="icon" data-icon="redo"></span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M9.53 2.47a.75.75 0 010 1.06L6.06 7H15a6 6 0 010 12h-3a.75.75 0 010-1.5h3a4.5 4.5 0 000-9H6.06l3.47 3.47a.75.75 0 11-1.06 1.06l-4.75-4.75a.75.75 0 010-1.06l4.75-4.75a.75.75 0 011.06 0z"/></svg>
         </button>
       </div>
     </div>

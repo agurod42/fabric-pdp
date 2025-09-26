@@ -30,11 +30,9 @@ small.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospa
 .topbar .right { flex-shrink: 0; }
 
 /* icon buttons */
-.icon-btn { width: 32px; height: 32px; padding: 0; display:inline-flex; align-items:center; justify-content:center; border-radius: 8px; border:1px solid #d1d5db; background:#f9fafb; }
+.icon-btn { width: 32px; height: 32px; padding: 0; display:inline-flex; align-items:center; justify-content:center; border-radius: 8px; border:1px solid #d1d5db; background:#f9fafb; box-sizing: border-box; overflow: hidden; }
 .icon-btn:hover { background:#f3f4f6; }
-.icon { display:inline-block; width: 16px; height: 16px; position: relative; }
-/* simple CSS icons using borders/shapes for no-asset footprint */
-.icon[data-icon="download"]::before { content:""; position:absolute; left:3px; right:3px; top:2px; bottom:9px; border-left:2px solid #374151; border-right:2px solid #374151; border-bottom:2px solid #374151; border-radius:2px; }
-.icon[data-icon="download"]::after { content:""; position:absolute; left:6px; right:6px; bottom:2px; height:4px; border-top:2px solid #374151; }
-.icon[data-icon="undo"]::before { content:""; position:absolute; left:2px; right:2px; top:4px; bottom:4px; border:2px solid #374151; border-right-color:transparent; border-bottom-color:transparent; border-radius:10px; transform:rotate(-45deg); }
-.icon[data-icon="redo"]::before { content:""; position:absolute; left:2px; right:2px; top:4px; bottom:4px; border:2px solid #374151; border-left-color:transparent; border-bottom-color:transparent; border-radius:10px; transform:rotate(45deg); }
+.icon-btn svg { width: 16px; height: 16px; display: block; color: #374151; }
+
+/* use undo icon mirrored for redo */
+#reapply svg { transform: scaleX(-1); transform-origin: center; }
