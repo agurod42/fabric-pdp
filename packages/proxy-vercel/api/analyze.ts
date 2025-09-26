@@ -85,6 +85,18 @@ Rules:
         { role: "user", content: JSON.stringify(payload) }
       ];
 
+      try {
+        const sys = typeof messages[0]?.content === "string" ? messages[0].content : "";
+        const usr = typeof messages[1]?.content === "string" ? messages[1].content : "";
+        console.debug("[PDP][api] llm prompt", {
+          traceId,
+          sys_len: sys.length,
+          usr_len: usr.length,
+          sys,
+          usr,
+        });
+      } catch {}
+
       const maxTokensEnv = Number(process.env.LLM_MAX_TOKENS || "");
       const NUM_PREDICT = Number.isFinite(maxTokensEnv) && maxTokensEnv > 0 ? Math.min(Math.floor(maxTokensEnv), 32000) : 1024;
       const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || "https://ai.thewisemonkey.co.uk/ollama";
