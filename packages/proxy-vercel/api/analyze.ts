@@ -135,6 +135,9 @@ Rules:
             if (!st || typeof st.selector !== "string") continue;
             const op = st.op || (st.setText ? "setText" : (st.setHTML ? "setHTML" : undefined));
             if (op !== "setText" && op !== "setHTML") continue;
+            // Filter out selectors we don't support mutating (e.g., meta tags)
+            const sel = String(st.selector).trim();
+            if (/^meta(\{|\[|\.|\s|$)/i.test(sel)) continue;
             let value: string | undefined;
             let valueRef: string | undefined;
             if (typeof st.value === "string") {
@@ -144,10 +147,32 @@ Rules:
               else value = st.valueRef;
             }
             const out: PatchStep = { selector: st.selector, op };
-            if (typeof valueRef === "string" && valueRef.length > 0) out.valueRef = valueRef;
-            else if (typeof value === "string") out.value = value;
-            else continue;
-            normalized.push(out);
+            // Only keep steps that have a concrete value or a valueRef that resolves inside the object
+            if (typeof value === "string") {
+              out.value = value;
+              normalized.push(out);
+              continue;
+            }
+            if (typeof valueRef === "string" && valueRef.length > 0) {
+              const get = (path: string) => path.split(".").reduce((a: any, k: string) => (a == null ? a : a[k]), obj);
+              let resolved = get(valueRef);
+              if (typeof resolved === "string") {
+                out.valueRef = valueRef;
+                normalized.push(out);
+                continue;
+              }
+              // Compatibility: if ref like fields.key.proposed, allow fallback to top-level key
+              const m = /^fields\.(title|description|shipping|returns)\.proposed$/.exec(valueRef);
+              if (m && typeof (obj as any)?.[m[1]] === "string") {
+                out.valueRef = valueRef; // client will handle the fallback
+                normalized.push(out);
+                continue;
+              }
+              // Unresolved valueRef -> drop this step server-side
+              continue;
+            }
+            // If neither value nor valueRef usable, skip
+            continue;
           }
           return normalized;
         };
