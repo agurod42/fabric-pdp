@@ -23,7 +23,7 @@ async function init(){
     const errBox = lastError
       ? `<div id="error" class="error"><div class="card" style="background:#FDE8E8;color:#611A15;border:1px solid #F8B4B4"><strong>Backend error</strong><div class="mono" style="white-space:pre-wrap">${enc(String(lastError))}</div></div></div>`
       : `<div id="error" class="error" style="display:none"></div>`;
-    app.innerHTML = `${errBox}<div class="divider"></div><div class="link"><a id="openOptions" href="#">Settings (whitelist)</a></div>`;
+    app.innerHTML = `${errBox}<div class="divider"></div><div class="link"><a id="openOptions" href="#">Settings</a></div>`;
     bindOptions();
     return;
   }
@@ -129,7 +129,7 @@ async function init(){
     </div>
     ${extraAppliedHtml}
     <div class="divider"></div>
-    <div class="link"><a id="openOptions" href="#">Settings (whitelist)</a></div>
+    <div class="link"><a id="openOptions" href="#">Settings</a></div>
   `;
   bindOptions();
 
