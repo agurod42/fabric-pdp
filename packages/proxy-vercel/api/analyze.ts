@@ -18,17 +18,19 @@ export default async function handler(req) {
   if (req.method === "OPTIONS") return jsonResponse({}, 204);
   if (req.method !== "POST") return jsonResponse({ error: "Use POST" }, 405);
 
-  const { url, title, meta, html_excerpt, language } = await req.json().catch((e) => {
+  const { url, title, meta, html_excerpt, language, trace_id } = await req.json().catch((e) => {
     console.error("[PDP][api] JSON parse error:", e);
     return {};
   });
+  const traceId = (typeof trace_id === "string" && trace_id) ? trace_id : "";
 
   try {
     const sizes = {
       html_excerpt_len: typeof html_excerpt === "string" ? html_excerpt.length : 0,
+      title_len: typeof title === "string" ? title.length : 0,
       meta_keys: meta ? Object.keys(meta).length : 0,
     };
-    console.debug("[PDP][api] request", { url, lang: language, sizes });
+    console.debug("[PDP][api] request", { traceId, url, lang: language, sizes });
   } catch {}
 
   // Prepare streaming response to send an early byte and avoid initial-response timeout
@@ -57,6 +59,7 @@ export default async function handler(req) {
         meta: meta ? Object.fromEntries(Object.entries(meta).map(([k, v]) => [k, safe(v).slice(0, 512)])) : {},
         language: safe(language).slice(0, 16),
         html_excerpt: safe(html_excerpt),
+        trace_id: traceId,
       };
 
       const SYS_PROMPT = `You are a careful extractor. Output STRICT JSON only, matching the schema.
@@ -88,18 +91,32 @@ Rules:
       const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gpt-oss";
       const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "";
 
+      try {
+        console.debug("[PDP][api] llm config", {
+          traceId,
+          base: OLLAMA_BASE,
+          model: OLLAMA_MODEL,
+          max_predict: NUM_PREDICT,
+          api_key_present: !!OLLAMA_API_KEY,
+          msg_lens: messages.map(m => (typeof m?.content === "string" ? m.content.length : 0)),
+        });
+      } catch {}
+
       if (!OLLAMA_API_KEY) {
         await writer.write(encoder.encode(JSON.stringify({ error: "Server misconfiguration: OLLAMA_API_KEY is required" })));
         await writer.close();
         return;
       }
 
+      const tFetchStart = Date.now();
+      const headersInit: Record<string, string> = {
+        "content-type": "application/json",
+        Authorization: `Bearer ${OLLAMA_API_KEY}`,
+      };
+      if (traceId) headersInit["x-trace-id"] = traceId;
       const resp = await fetch(`${OLLAMA_BASE}/api/chat`, {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          Authorization: `Bearer ${OLLAMA_API_KEY}`,
-        },
+        headers: headersInit,
         body: JSON.stringify({
           model: OLLAMA_MODEL,
           messages,
@@ -107,6 +124,15 @@ Rules:
           options: { temperature: 0, num_predict: NUM_PREDICT }
         })
       });
+      try {
+        console.debug("[PDP][api] llm fetch", {
+          traceId,
+          status: resp.status,
+          ok: resp.ok,
+          took_ms: Date.now() - tFetchStart,
+          content_length: resp.headers.get("content-length") || null,
+        });
+      } catch {}
       if (!resp.ok) {
         let errTxt = "";
         try { errTxt = await resp.text(); } catch {}
@@ -118,7 +144,11 @@ Rules:
       const end = txt.lastIndexOf("}");
       const raw = txt.slice(start, end + 1);
       let obj: any;
-      try { obj = JSON.parse(raw); } catch {}
+      try { obj = JSON.parse(raw); } catch (parseErr) {
+        try {
+          console.warn("[PDP][api] llm parse error", { traceId, msg_len: txt.length, raw_len: raw.length, error: String((parseErr as any)?.message || parseErr) });
+        } catch {}
+      }
       if (obj && typeof obj === 'object') {
         if (!Array.isArray(obj.warnings)) obj.warnings = [];
         type PatchStep = { selector: string; op: "setText" | "setHTML"; value?: string };
@@ -172,11 +202,20 @@ Rules:
         };
         obj.patch = normalizePatch(obj.patch);
         const enriched = JSON.stringify(obj);
+        try {
+          console.debug("[PDP][api] llm parsed ok", {
+            traceId,
+            took_ms: Date.now() - t0,
+            is_pdp: !!obj?.is_pdp,
+            patch: Array.isArray(obj?.patch) ? obj.patch.length : 0,
+          });
+        } catch {}
         await writer.write(encoder.encode(enriched));
         await writer.close();
         return;
       }
-      console.debug("[PDP][api] openai response parsed", {
+      console.debug("[PDP][api] llm raw passthrough", {
+        traceId,
         took_ms: Date.now() - t0,
         content_len: txt.length,
         raw_len: raw.length,
@@ -184,7 +223,7 @@ Rules:
       await writer.write(encoder.encode(raw));
       await writer.close();
     } catch (e: any) {
-      console.error("[PDP][api] error", e);
+      console.error("[PDP][api] error", { traceId, error: e });
       try {
         await writer.write(encoder.encode(JSON.stringify({ error: String(e?.message || e) })));
       } catch {}
