@@ -87,7 +87,6 @@ export default async function handler(req) {
         Choose the MOST SPECIFIC and STABLE selector that uniquely matches EXACTLY ONE element **within the provided html_excerpt**:
         - Prefer short paths with IDs and stable classes, e.g. \`main h1#product-title\`, \`.product-main h1.title\`.
         - Avoid: generic tags alone (\`h1\`, \`main\`, \`body\`), grouped selectors (\`, \`), wildcards (\`*\`), :nth-child, :contains, attribute substrings with hashes/UUID-like classnames, script/style/meta/link tags.
-        - NEVER target headings/labels/tabs/accordion triggers (e.g., “Description”, “Shipping”, “Returns”). Target the content container (paragraphs / list items) inside the section body.
         - If a field has multiple occurrences in the excerpt, set the field’s primary \`selector\` to the canonical PDP element, then add **additional** patch steps to cover duplicates (same value).
         - If no safe, content-bearing node exists, leave the field’s selector empty and omit patches for it.
 
