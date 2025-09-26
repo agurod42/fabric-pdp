@@ -54,10 +54,10 @@ export default async function handler(req) {
       // Server-side truncation and payload slimming
       const safe = (s: any) => (typeof s === "string" ? s : "");
       const payload = {
-        url: safe(url).slice(0, 2048),
-        title: safe(title).slice(0, 512),
-        meta: meta ? Object.fromEntries(Object.entries(meta).map(([k, v]) => [k, safe(v).slice(0, 512)])) : {},
-        language: safe(language).slice(0, 16),
+        url: safe(url),
+        title: safe(title),
+        meta: meta ? Object.fromEntries(Object.entries(meta).map(([k, v]) => [k, safe(v)])) : {},
+        language: safe(language),
         html_excerpt: safe(html_excerpt),
         trace_id: traceId,
       };

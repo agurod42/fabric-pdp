@@ -28,30 +28,28 @@ function sanitizeHtmlFromDom() {
     while (walker.nextNode()) comments.push(walker.currentNode);
     comments.forEach(c => c.parentNode && c.parentNode.removeChild(c));
 
-    // Strip dangerous attributes but keep class/id/data-*
+    // Strip dangerous attributes and unwanted attrs; keep only safe structural ones like class/id
     const nodes = body.querySelectorAll('*');
     nodes.forEach((el) => {
       // Remove inline event handlers and inline style
+      const isImg = (el.tagName || '').toLowerCase() === 'img';
       Array.from(el.attributes).forEach(attr => {
         const name = attr.name.toLowerCase();
-        if (name.startsWith('on') || name === 'style') el.removeAttribute(attr.name);
-        if (name === 'href' && /^\s*javascript:/i.test(attr.value)) el.setAttribute('href', '#');
+        const value = attr.value || '';
+        if (name.startsWith('on') || name === 'style') { el.removeAttribute(attr.name); return; }
+        // Remove all hrefs entirely
+        if (name === 'href') { el.removeAttribute('href'); return; }
+        // Remove all data-* attributes
+        if (name.startsWith('data-')) { el.removeAttribute(attr.name); return; }
+        // Remove img src and srcset
+        if (isImg && (name === 'src' || name === 'srcset')) { el.removeAttribute(attr.name); return; }
+        // Extra safety: drop javascript: in any src-like attributes
+        if ((name === 'src' || name === 'xlink:href') && /^\s*javascript:/i.test(value)) { el.removeAttribute(attr.name); return; }
       });
     });
 
-    // Include first JSON-LD Product/Offer script separately (safe text)
-    let ldjson = null;
-    try {
-      const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
-      for (const s of scripts) {
-        const txt = s.textContent || '';
-        if (/("@type"\s*:\s*"(?:Product|Offer)")/i.test(txt)) { ldjson = txt.slice(0, 20000); break; }
-      }
-    } catch {}
-
     // Serialize and minify whitespace
     let html = (body.outerHTML || '').replace(/>\s+</g, '><').replace(/\s{2,}/g, ' ');
-    if (ldjson) html = `<!-- PRODUCT_SCHEMA_JSON_LD -->` + ldjson + `<!-- /PRODUCT_SCHEMA_JSON_LD -->` + html;
     return html;
   } catch {
     // Fallback to raw body HTML
