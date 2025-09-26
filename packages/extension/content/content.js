@@ -3,8 +3,7 @@ const api = (typeof browser !== 'undefined') ? browser : chrome;
 const DEBUG = true;
 const log = (...args) => { if (DEBUG) console.debug("[PDP][content]", ...args); };
 
-const MAX_HTML = 100000;
-let __htmlWasTruncated = false;
+// Deprecated truncation flags removed
 
 // Frontend no longer computes heuristics; LLM decides PDP.
 
@@ -52,13 +51,11 @@ function sanitizeHtmlFromDom() {
 
     // Serialize and minify whitespace
     let html = (body.outerHTML || '').replace(/>\s+</g, '><').replace(/\s{2,}/g, ' ');
-    if (html.length > MAX_HTML) { __htmlWasTruncated = true; html = html.slice(0, MAX_HTML); }
     if (ldjson) html = `<!-- PRODUCT_SCHEMA_JSON_LD -->` + ldjson + `<!-- /PRODUCT_SCHEMA_JSON_LD -->` + html;
     return html;
   } catch {
-    // Fallback to raw body HTML truncated
+    // Fallback to raw body HTML
     const raw = (document.body?.outerHTML || document.documentElement.outerHTML || '');
-    if (raw.length > MAX_HTML) { __htmlWasTruncated = true; return raw.slice(0, MAX_HTML); }
     return raw;
   }
 }
@@ -76,14 +73,12 @@ async function main() {
       title: document.title,
       meta: getMeta(),
       html_excerpt: sanitizeHtmlFromDom(),
-      html_truncated: !!__htmlWasTruncated,
       language: document.documentElement.getAttribute("lang") || navigator.language || "en"
     };
 
     const approx = {
       html_excerpt_len: typeof payload.html_excerpt === "string" ? payload.html_excerpt.length : 0,
       // heuristics removed
-      html_truncated: payload.html_truncated,
     };
   log("send LLM_ANALYZE", approx);
   try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "…" }); } catch {}

@@ -21,7 +21,7 @@ export default async function handler(req) {
   if (req.method === "OPTIONS") return jsonResponse({}, 204);
   if (req.method !== "POST") return jsonResponse({ error: "Use POST" }, 405);
 
-  const { url, title, meta, html_excerpt, html_truncated, language } = await req.json().catch((e) => {
+  const { url, title, meta, html_excerpt, language } = await req.json().catch((e) => {
     console.error("[PDP][api] JSON parse error:", e);
     return {};
   });
@@ -31,7 +31,7 @@ export default async function handler(req) {
       html_excerpt_len: typeof html_excerpt === "string" ? html_excerpt.length : 0,
       meta_keys: meta ? Object.keys(meta).length : 0,
     };
-    console.debug("[PDP][api] request", { url, lang: language, sizes, html_truncated: !!html_truncated });
+    console.debug("[PDP][api] request", { url, lang: language, sizes });
   } catch {}
 
   // Prepare streaming response to send an early byte and avoid initial-response timeout
@@ -76,16 +76,13 @@ export default async function handler(req) {
       }
 
       // Server-side truncation and payload slimming
-      // Increase budget so product descriptions further down the DOM are included
-      const BUDGET = 100000; // aligned with content script MAX_HTML
       const safe = (s: any) => (typeof s === "string" ? s : "");
       const payload = {
         url: safe(url).slice(0, 2048),
         title: safe(title).slice(0, 512),
         meta: meta ? Object.fromEntries(Object.entries(meta).map(([k, v]) => [k, safe(v).slice(0, 512)])) : {},
         language: safe(language).slice(0, 16),
-        html_excerpt: safe(html_excerpt).slice(0, BUDGET),
-        html_truncated: !!html_truncated,
+        html_excerpt: safe(html_excerpt),
       };
 
       const oai = new OpenAI({ apiKey: openaiKey });
@@ -127,7 +124,6 @@ Rules:
       try { obj = JSON.parse(raw); } catch {}
       if (obj && typeof obj === 'object') {
         if (!Array.isArray(obj.warnings)) obj.warnings = [];
-        if (payload.html_truncated) obj.warnings.push("Input HTML was truncated before analysis; results may be incomplete.");
         type PatchStep = { selector: string; op: "setText" | "setHTML"; valueRef?: string; value?: string };
         const normalizePatch = (arr: any): PatchStep[] => {
           if (!Array.isArray(arr)) return [];
