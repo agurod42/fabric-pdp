@@ -21,7 +21,10 @@ small.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospa
 .selector { margin: 2px 0 6px; color:#6b7280; }
 .diff-item { margin-bottom: 10px; }
 .diff-item > .label { font-size: 12px; font-weight: 600; color: #111827; }
-.diff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.diff-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.diff-grid > div { min-width: 0; }
+/* ensure long content doesn't force uneven widths */
+.diff-grid .card { overflow-wrap: anywhere; word-break: break-word; }
 .divider { height: 1px; background: #e5e7eb; margin: 10px 0; }
 
 /* top bar layout */
