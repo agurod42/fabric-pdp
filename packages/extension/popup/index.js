@@ -21,9 +21,9 @@ async function init(){
   if (!plan) {
     const enc = s => { const d=document.createElement("div"); d.textContent=s; return d.innerHTML; };
     const errBox = lastError
-      ? `<div id="error" class="error"><div class="card" style="background:#FDE8E8;color:#611A15;border:1px solid #F8B4B4"><strong>Proxy error</strong><div class="mono" style="white-space:pre-wrap">${enc(String(lastError))}</div></div></div>`
+      ? `<div id="error" class="error"><div class="card" style="background:#FDE8E8;color:#611A15;border:1px solid #F8B4B4"><strong>Backend error</strong><div class="mono" style="white-space:pre-wrap">${enc(String(lastError))}</div></div></div>`
       : `<div id="error" class="error" style="display:none"></div>`;
-    app.innerHTML = `${errBox}<div class="link"><a id="openOptions" href="#">Settings (whitelist)</a></div>`;
+    app.innerHTML = `${errBox}<div class="divider"></div><div class="link"><a id="openOptions" href="#">Settings (whitelist)</a></div>`;
     bindOptions();
     return;
   }
@@ -58,24 +58,47 @@ async function init(){
   const resultHeader = plan.is_pdp ? 'PDP detected' : 'No PDP detected';
   const resultEmoji = plan.is_pdp ? '✅' : 'ℹ️';
   app.innerHTML = `
-    <h3>${resultEmoji} ${resultHeader}</h3>
-    <div class="status"><small class="mono">${enc(url)}</small></div>
+    <div class="topbar">
+      <div class="left">
+        <h3>${resultEmoji} ${resultHeader}</h3>
+      </div>
+      <div id="actionsRight" class="right actions icons" style="display:none">
+        <button id="saveHtml" class="icon-btn" title="Save reduced HTML" aria-label="Save reduced HTML">
+          <span class="icon" data-icon="download"></span>
+        </button>
+        <button id="revert" class="icon-btn" title="Revert" aria-label="Revert" disabled>
+          <span class="icon" data-icon="undo"></span>
+        </button>
+        <button id="reapply" class="icon-btn" title="Re-apply" aria-label="Re-apply" disabled>
+          <span class="icon" data-icon="redo"></span>
+        </button>
+      </div>
+    </div>
     <div id="error" class="error" style="display:none"></div>
-    <div class="link"><a id="saveHtml" href="#">Save reduced HTML</a></div>
     <div id="diffs" class="diffs">
       ${renderFieldDiff('title','Title')}
       ${renderFieldDiff('description','Description')}
       ${renderFieldDiff('shipping','Shipping')}
       ${renderFieldDiff('returns','Returns')}
     </div>
-    <div class="actions two">
-      <button id="revert" disabled>Revert</button>
-      <button id="reapply" disabled>Re-apply</button>
-    </div>
     <div class="divider"></div>
     <div class="link"><a id="openOptions" href="#">Settings (whitelist)</a></div>
   `;
   bindOptions();
+
+  // If we already know there's a proxy error, show it and hide details/actions immediately
+  if (lastError) {
+    const box = document.getElementById("error");
+    if (box) {
+      box.style.display = "block";
+      const enc = (s) => { const d=document.createElement("div"); d.textContent=s; return d.innerHTML; };
+      box.innerHTML = `<div class="card" style="background:#FDE8E8;color:#611A15;border:1px solid #F8B4B4"><strong>Backend error</strong><div class="mono" style="white-space:pre-wrap">${enc(String(lastError))}</div></div>`;
+    }
+    const diffsEl = document.getElementById("diffs");
+    if (diffsEl) diffsEl.style.display = "none";
+    const actionsRightInit = document.getElementById("actionsRight");
+    if (actionsRightInit) actionsRightInit.style.display = "none";
+  }
 
   // fetch latest apply summary (if any) for this tab+url
   // also fetch any last error
@@ -86,7 +109,11 @@ async function init(){
     if (box && error) {
       box.style.display = "block";
       const enc = (s) => { const d=document.createElement("div"); d.textContent=s; return d.innerHTML; };
-      box.innerHTML = `<div class="card" style="background:#FDE8E8;color:#611A15;border:1px solid #F8B4B4"><strong>Proxy error</strong><div class="mono" style="white-space:pre-wrap">${enc(String(error))}</div></div>`;
+      box.innerHTML = `<div class="card" style="background:#FDE8E8;color:#611A15;border:1px solid #F8B4B4"><strong>Backend error</strong><div class="mono" style="white-space:pre-wrap">${enc(String(error))}</div></div>`;
+      const diffsEl = document.getElementById("diffs");
+      if (diffsEl) diffsEl.style.display = "none";
+      const actionsRightEl = document.getElementById("actionsRight");
+      if (actionsRightEl) actionsRightEl.style.display = "none";
     }
   } catch {}
   try {
@@ -111,6 +138,7 @@ async function init(){
   const revertBtn = document.getElementById("revert");
   const reapplyBtn = document.getElementById("reapply");
   const saveHtmlLink = document.getElementById("saveHtml");
+  const actionsRight = document.getElementById("actionsRight");
 
   const hasApplied = Array.isArray(latestSummary?.results) && latestSummary.results.some(r => r.status === 'applied');
   const hasPrev = Array.isArray(latestSummary?.results) && latestSummary.results.some(r => typeof r.prev === 'string');
@@ -119,6 +147,8 @@ async function init(){
   if (hasApplied) revertBtn.removeAttribute('disabled');
   // Enable re-apply only if we can revert (i.e., have prev snapshots)
   if (hasPrev) reapplyBtn.removeAttribute('disabled');
+  // Show actions only when we have a result (applied steps)
+  if (actionsRight) actionsRight.style.display = hasApplied ? 'flex' : 'none';
 
   if (saveHtmlLink) {
     saveHtmlLink.addEventListener('click', async (e) => {

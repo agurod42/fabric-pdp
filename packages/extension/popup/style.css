@@ -5,7 +5,8 @@ h3 { margin: 0 0 8px; font-size: 16px; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; background:#fff; max-height: 160px; overflow: auto; font-size: 12px; }
 .label { font-size: 11px; color: #374151; margin-bottom: 4px; }
-.actions { display:flex; gap:8px; margin-top: 10px; }
+.actions { display:flex; gap:8px; }
+/* legacy two-wide buttons no longer used */
 .actions.two button { flex: 1 1 50%; }
 button { padding: 6px 10px; border-radius: 8px; border:1px solid #d1d5db; background:#f9fafb; cursor:pointer; }
 button:hover { background:#f3f4f6; }
@@ -22,3 +23,18 @@ small.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospa
 .diff-item > .label { font-size: 12px; font-weight: 600; color: #111827; }
 .diff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .divider { height: 1px; background: #e5e7eb; margin: 10px 0; }
+
+/* top bar layout */
+.topbar { display:flex; align-items:center; justify-content:space-between; gap: 8px; margin-bottom: 8px; }
+.topbar .left { min-width: 0; }
+.topbar .right { flex-shrink: 0; }
+
+/* icon buttons */
+.icon-btn { width: 32px; height: 32px; padding: 0; display:inline-flex; align-items:center; justify-content:center; border-radius: 8px; border:1px solid #d1d5db; background:#f9fafb; }
+.icon-btn:hover { background:#f3f4f6; }
+.icon { display:inline-block; width: 16px; height: 16px; position: relative; }
+/* simple CSS icons using borders/shapes for no-asset footprint */
+.icon[data-icon="download"]::before { content:""; position:absolute; left:3px; right:3px; top:2px; bottom:9px; border-left:2px solid #374151; border-right:2px solid #374151; border-bottom:2px solid #374151; border-radius:2px; }
+.icon[data-icon="download"]::after { content:""; position:absolute; left:6px; right:6px; bottom:2px; height:4px; border-top:2px solid #374151; }
+.icon[data-icon="undo"]::before { content:""; position:absolute; left:2px; right:2px; top:4px; bottom:4px; border:2px solid #374151; border-right-color:transparent; border-bottom-color:transparent; border-radius:10px; transform:rotate(-45deg); }
+.icon[data-icon="redo"]::before { content:""; position:absolute; left:2px; right:2px; top:4px; bottom:4px; border:2px solid #374151; border-left-color:transparent; border-bottom-color:transparent; border-radius:10px; transform:rotate(45deg); }
