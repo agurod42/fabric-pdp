@@ -1,4 +1,3 @@
-
 export const config = { runtime: "edge" };
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
@@ -85,7 +84,7 @@ export default async function handler(req) {
         html_excerpt: safe(html_excerpt),
       };
 
-      const oai = new OpenAI({ apiKey: openaiKey });
+      const oai = new OpenAI({ apiKey: openaiKey, baseURL: "https://ai.thewisemonkey.co.uk/api" });
       const SYS_PROMPT = `You are a careful extractor. Output STRICT JSON only, matching the schema.
 Rules:
 - Determine if the page is a merchant Product Detail Page.
@@ -107,7 +106,7 @@ Rules:
 
       const maxTokensEnv = Number(process.env.LLM_MAX_TOKENS || "");
       const MAX_TOKENS = Number.isFinite(maxTokensEnv) && maxTokensEnv > 0 ? Math.min(Math.floor(maxTokensEnv), 32000) : 5000;
-      const model = "gpt-4o";
+      const model = "gpt-oss";
       const resp = await oai.chat.completions.create({
         model,
         messages,
