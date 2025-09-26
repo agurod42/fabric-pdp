@@ -121,6 +121,7 @@ async function main() {
   } catch (e) {
     console.error("[PDP][content] error", e);
     try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "ERR" }); } catch {}
+    try { await api.runtime.sendMessage({ type: "SET_LAST_ERROR", error: String(e?.message || e) }); } catch {}
   }
 }
 

@@ -106,6 +106,11 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ ok: true, summary }); return;
         } catch (e) {
           console.error("[PDP][bg] APPLY_PATCH error", e);
+          try {
+            const errKey = (tabId != null) ? `error:${tabId}` : undefined;
+            const msgStr = String(e?.message || e);
+            if (errKey) { sessionCache.set(errKey, msgStr); try { await cacheSet(errKey, msgStr); } catch {} }
+          } catch {}
           sendResponse({ error: String(e) }); return;
         }
       }
@@ -131,6 +136,17 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const has = typeof err === 'string' && err.trim().length > 0;
         log("GET_LAST_ERROR", { key, has });
         sendResponse({ error: has ? err : null }); return;
+      }
+      if (msg.type === "SET_LAST_ERROR") {
+        const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
+        const key = (tabId != null) ? `error:${tabId}` : undefined;
+        const val = String(msg.error || msg.message || "");
+        if (key) {
+          sessionCache.set(key, val);
+          try { await cacheSet(key, val); } catch {}
+          log("SET_LAST_ERROR", { key, len: val.length });
+        }
+        sendResponse({ ok: true }); return;
       }
       if (msg.type === "SHOULD_RUN") {
         const cfg = await api.storage.local.get(["whitelist"]);
