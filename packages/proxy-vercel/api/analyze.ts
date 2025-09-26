@@ -113,7 +113,7 @@ Rules:
       const params: any = {
         model,
         messages,
-        temperature: 0.2,
+        temperature: 1,
         response_format: { type: "json_object" }
       };
       // Newer models (e.g., gpt-5, gpt-4o family) require max_completion_tokens
