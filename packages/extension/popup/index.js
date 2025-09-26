@@ -61,6 +61,7 @@ async function init(){
     <h3>${resultEmoji} ${resultHeader}</h3>
     <div class="status"><small class="mono">${enc(url)}</small></div>
     <div id="error" class="error" style="display:none"></div>
+    <div class="link"><a id="saveHtml" href="#">Save reduced HTML</a></div>
     <div id="diffs" class="diffs">
       ${renderFieldDiff('title','Title')}
       ${renderFieldDiff('description','Description')}
@@ -109,6 +110,7 @@ async function init(){
 
   const revertBtn = document.getElementById("revert");
   const reapplyBtn = document.getElementById("reapply");
+  const saveHtmlLink = document.getElementById("saveHtml");
 
   const hasApplied = Array.isArray(latestSummary?.results) && latestSummary.results.some(r => r.status === 'applied');
   const hasPrev = Array.isArray(latestSummary?.results) && latestSummary.results.some(r => typeof r.prev === 'string');
@@ -117,6 +119,54 @@ async function init(){
   if (hasApplied) revertBtn.removeAttribute('disabled');
   // Enable re-apply only if we can revert (i.e., have prev snapshots)
   if (hasPrev) reapplyBtn.removeAttribute('disabled');
+
+  if (saveHtmlLink) {
+    saveHtmlLink.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try {
+        const [tab] = await api.tabs.query({ active:true, currentWindow:true });
+        const tabId = tab?.id;
+        if (tabId == null) return;
+        const [{ result }] = await api.scripting.executeScript({ target: { tabId }, func: () => {
+          const g = (n) => document.querySelector(`meta[property="${n}"], meta[name="${n}"]`)?.getAttribute("content") || null;
+          const meta = { ogTitle: g("og:title"), ogDescription: g("og:description"), twTitle: g("twitter:title"), twDescription: g("twitter:description") };
+          // inline a minimal copy of sanitize logic without stripping attributes extensively
+          const doc = document.cloneNode(true);
+          const body = doc.body || doc.documentElement;
+          ['script','style','noscript','template','iframe','object','embed','svg','canvas','picture','source'].forEach(tag => Array.from(body.querySelectorAll(tag)).forEach(n => n.remove()));
+          const walker = doc.createTreeWalker(body, NodeFilter.SHOW_COMMENT, null);
+          const comments = [];
+          while (walker.nextNode()) comments.push(walker.currentNode);
+          comments.forEach(c => c.parentNode && c.parentNode.removeChild(c));
+          const nodes = body.querySelectorAll('*');
+          nodes.forEach((el) => {
+            Array.from(el.attributes).forEach(attr => {
+              const name = attr.name.toLowerCase();
+              if (name.startsWith('on') || name === 'style') el.removeAttribute(attr.name);
+              if (name === 'href' && /^\s*javascript:/i.test(attr.value)) el.setAttribute('href', '#');
+            });
+          });
+          let html = (body.outerHTML || '').replace(/>\s+</g, '><').replace(/\s{2,}/g, ' ');
+          const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          return { url, meta };
+        }});
+        const { url: blobUrl } = result || {};
+        if (blobUrl) {
+          const filename = 'reduced-pdp.html';
+          try {
+            await api.downloads.download({ url: blobUrl, filename, saveAs: true });
+          } catch {
+            // Fallback to programmatic link click if downloads API blocked
+            const a = document.createElement('a');
+            a.href = blobUrl; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+          }
+        }
+      } catch (err) {
+        console.error('[PDP][popup] save html error', err);
+      }
+    });
+  }
 
   function buildRevertFromSummary(plan, summary){
     const inv = { ...plan, patch: [] };
