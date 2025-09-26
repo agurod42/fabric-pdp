@@ -202,7 +202,6 @@ async function callLLM(payload) {
 
 function applyPatchInPage(plan) {
   const log = (...args) => { try { console.debug("[PDP][apply]", ...args); } catch(_){} };
-  function get(path){ return path.split(".").reduce((a,k)=>a?.[k], plan); }
   const deny = /(?:<script|javascript:|on\w+=|<iframe|<object)/i;
   const PREFIX = "[PDP] ";
   const ensurePrefixed = (s) => (typeof s === "string" && !s.startsWith(PREFIX)) ? (PREFIX + s) : s;
@@ -212,7 +211,7 @@ function applyPatchInPage(plan) {
   log("apply start", { steps: steps.length });
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
-    const entry = { index: i, selector: step.selector, op: step.op, valueRef: step.valueRef, status: "pending", note: "" };
+    const entry = { index: i, selector: step.selector, op: step.op, status: "pending", note: "" };
     try {
       const node = document.querySelector(step.selector);
       if (!node) { entry.status = "skipped"; entry.note = "selector not found"; log("selector not found", step.selector); results.push(entry); continue; }
@@ -221,29 +220,10 @@ function applyPatchInPage(plan) {
       const noPrefix = !!step.noPrefix;
       if (typeof step.value === "string") {
         val = step.value;
-      } else if (typeof step.valueRef === "string") {
-        const ref = step.valueRef;
-        const deref = get(ref);
-        if (typeof deref === "string") {
-          val = deref;
-        } else {
-          // Compatibility: if ref is like fields.key.proposed, try top-level key
-          const m = /^fields\.(title|description|shipping|returns)\.proposed$/.exec(ref);
-          if (m) {
-            const alt = plan?.[m[1]];
-            if (typeof alt === "string") val = alt;
-          }
-          // If ref looks like a path but unresolved, skip rather than injecting the ref string
-          if (!val && ref.includes(".")) {
-            entry.status = "skipped"; entry.note = "unresolved valueRef"; log("unresolved valueRef", ref); results.push(entry); continue;
-          }
-          // If it's not a path (no dots), treat as literal fallback
-          if (!val) val = ref;
-        }
       }
-      if (typeof val !== "string") { entry.status = "skipped"; entry.note = "value not string"; log("value not string", step.valueRef); results.push(entry); continue; }
-      if (val.length === 0 && !allowEmpty) { entry.status = "skipped"; entry.note = "empty value"; log("empty value", step.valueRef); results.push(entry); continue; }
-      if (deny.test(val)) { entry.status = "skipped"; entry.note = "value denied by policy"; log("value denied", step.valueRef); results.push(entry); continue; }
+      if (typeof val !== "string") { entry.status = "skipped"; entry.note = "value not string"; log("value not string", step.selector); results.push(entry); continue; }
+      if (val.length === 0 && !allowEmpty) { entry.status = "skipped"; entry.note = "empty value"; log("empty value", step.selector); results.push(entry); continue; }
+      if (deny.test(val)) { entry.status = "skipped"; entry.note = "value denied by policy"; log("value denied", step.selector); results.push(entry); continue; }
       const outVal = noPrefix ? val : ensurePrefixed(val);
       if (step.op === "setText") {
         entry.prev = String(node.textContent ?? "");
