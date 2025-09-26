@@ -28,13 +28,29 @@ async function init(){
     return;
   }
   const enc = (s) => { const d=document.createElement("div"); d.textContent=String(s ?? ""); return d.innerHTML; };
+
+  // Try to fetch latest apply summary BEFORE rendering so we can show applied values
+  let latestSummary = null;
+  try {
+    const { summary } = await api.runtime.sendMessage({ type: "GET_APPLY_SUMMARY", url, tabId });
+    if (summary && typeof summary === 'object') latestSummary = summary;
+  } catch {}
+
   const renderFieldDiff = (key, label) => {
     const f = plan.fields?.[key];
     if (!f || !f.selector) return "";
     const selector = enc(f.selector);
     const allowHTML = !!f.html;
     const prev = typeof f.original === 'string' ? f.original : '';
-    const curr = typeof f.proposed === 'string' ? f.proposed : '';
+    // Prefer applied value from summary (post-patch), else fall back to proposed
+    let applied = '';
+    try {
+      if (latestSummary && Array.isArray(latestSummary.results)) {
+        const r = latestSummary.results.find(r => r && r.status === 'applied' && r.selector === f.selector && typeof r.value === 'string');
+        if (r && typeof r.value === 'string') applied = r.value;
+      }
+    } catch {}
+    const curr = (typeof applied === 'string' && applied.length > 0) ? applied : (typeof f.proposed === 'string' ? f.proposed : '');
     const prevHtml = allowHTML ? prev : enc(prev);
     const currHtml = allowHTML ? curr : enc(curr);
     return `
@@ -57,6 +73,23 @@ async function init(){
 
   const resultHeader = plan.is_pdp ? 'PDP detected' : 'No PDP detected';
   const resultEmoji = plan.is_pdp ? '✅' : 'ℹ️';
+  // Build list of additional applied changes beyond the primary field selectors
+  let extraAppliedHtml = '';
+  try {
+    if (latestSummary && Array.isArray(latestSummary.results)) {
+      const primarySelectors = new Set(["title","description","shipping","returns"].map(k => plan.fields?.[k]?.selector).filter(Boolean));
+      const extras = latestSummary.results.filter(r => r && r.status === 'applied' && r.selector && !primarySelectors.has(r.selector));
+      if (extras.length > 0) {
+        const items = extras.map(r => {
+          const val = (typeof r.value === 'string') ? r.value : '';
+          const show = val ? enc(val) : '<span style="color:#6b7280">(no value)</span>';
+          return `<div class="result"><code>${enc(r.op)}</code> <code>${enc(r.selector)}</code><div class="card">${show}</div></div>`;
+        }).join("");
+        extraAppliedHtml = `<div class="divider"></div><div class="extras"><div class="label">Additional applied changes</div>${items}</div>`;
+      }
+    }
+  } catch {}
+
   app.innerHTML = `
     <div class="topbar">
       <div class="left">
@@ -81,6 +114,7 @@ async function init(){
       ${renderFieldDiff('shipping','Shipping')}
       ${renderFieldDiff('returns','Returns')}
     </div>
+    ${extraAppliedHtml}
     <div class="divider"></div>
     <div class="link"><a id="openOptions" href="#">Settings (whitelist)</a></div>
   `;
@@ -100,9 +134,7 @@ async function init(){
     if (actionsRightInit) actionsRightInit.style.display = "none";
   }
 
-  // fetch latest apply summary (if any) for this tab+url
-  // also fetch any last error
-  let latestSummary = null;
+  // also fetch any last error and render it
   try {
     const { error } = await api.runtime.sendMessage({ type: "GET_LAST_ERROR", url, tabId });
     const box = document.getElementById("error");
@@ -114,24 +146,6 @@ async function init(){
       if (diffsEl) diffsEl.style.display = "none";
       const actionsRightEl = document.getElementById("actionsRight");
       if (actionsRightEl) actionsRightEl.style.display = "none";
-    }
-  } catch {}
-  try {
-    const { summary } = await api.runtime.sendMessage({ type: "GET_APPLY_SUMMARY", url, tabId });
-    const box = document.getElementById("summary");
-    if (box && summary && typeof summary === 'object') {
-      latestSummary = summary;
-      const parts = [];
-      parts.push(`<div class="summary-row"><strong>Patch</strong>: ${summary.steps_applied || 0}/${summary.steps_total || 0} applied` +
-        (summary.steps_skipped ? `, ${summary.steps_skipped} skipped` : '') +
-        (summary.steps_error ? `, ${summary.steps_error} errors` : '') +
-        ` (${summary.took_ms || 0} ms)</div>`);
-      const details = Array.isArray(summary.results) ? summary.results.map(r => {
-        const badge = r.status === 'applied' ? '✅' : r.status === 'skipped' ? '⚠️' : '❌';
-        const val = (typeof r.value === 'string') ? r.value : '';
-        return `<div class="result">${badge} <code>${r.op}</code> <code>${r.selector}</code> — ${r.status}${r.note ? ` (${r.note})` : ''}${val ? `<div><small>value:</small> ${val}</div>` : ''}</div>`;
-      }).join("") : "";
-      box.innerHTML = `<div class="card">${parts.join("")}${details}</div>`;
     }
   } catch {}
 
