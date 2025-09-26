@@ -97,10 +97,8 @@ Rules:
         });
       } catch {}
 
-      const maxTokensEnv = Number(process.env.LLM_MAX_TOKENS || "");
-      const NUM_PREDICT = Number.isFinite(maxTokensEnv) && maxTokensEnv > 0 ? Math.min(Math.floor(maxTokensEnv), 32000) : 1024;
       const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || "https://ai.thewisemonkey.co.uk/ollama";
-      const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5:7b-instruct";
+      const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2";
       const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "";
 
       try {
@@ -108,7 +106,6 @@ Rules:
           traceId,
           base: OLLAMA_BASE,
           model: OLLAMA_MODEL,
-          max_predict: NUM_PREDICT,
           api_key_present: !!OLLAMA_API_KEY,
           msg_lens: messages.map(m => (typeof m?.content === "string" ? m.content.length : 0)),
         });
@@ -133,7 +130,7 @@ Rules:
           model: OLLAMA_MODEL,
           messages,
           stream: false,
-          options: { temperature: 0, num_predict: NUM_PREDICT }
+          options: { temperature: 0 }
         })
       });
       try {
