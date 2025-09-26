@@ -13,6 +13,20 @@ function fillStrategySelect(selectEl){
   selectEl.innerHTML = STRATEGIES.map(s => `<option value="${s.id}">${s.label}</option>`).join("");
 }
 
+function showToast(message){
+  const el = document.getElementById("toast");
+  if (!el) return;
+  el.textContent = String(message || "Saved");
+  el.style.display = "block";
+  requestAnimationFrame(()=>{
+    el.classList.add("show");
+    setTimeout(()=>{
+      el.classList.remove("show");
+      setTimeout(()=>{ el.style.display = "none"; }, 200);
+    }, 1600);
+  });
+}
+
 async function load(){
   log("load settings");
   const cfg = await api.storage.local.get(["whitelist","strategySettings"]);
@@ -81,11 +95,13 @@ document.getElementById("add").addEventListener("click", async ()=>{
   await api.storage.local.set({ whitelist: wl });
   document.getElementById("host").value = "";
   renderWhitelist(wl);
+  showToast("Whitelist updated");
 });
 document.getElementById("clear").addEventListener("click", async ()=>{
   log("clear whitelist");
   await api.storage.local.set({ whitelist: [] });
   renderWhitelist([]);
+  showToast("Whitelist cleared");
 });
 
 document.getElementById("saveGlobal").addEventListener("click", async ()=>{
@@ -95,6 +111,7 @@ document.getElementById("saveGlobal").addEventListener("click", async ()=>{
   const s = cfg?.strategySettings || { global: "jsonLdStrategy", perDomain: [] };
   await api.storage.local.set({ strategySettings: { ...s, global: id } });
   renderStrategies({ ...s, global: id });
+  showToast("Global strategy saved");
 });
 
 document.getElementById("addOverride").addEventListener("click", async ()=>{
@@ -108,13 +125,15 @@ document.getElementById("addOverride").addEventListener("click", async ()=>{
   await api.storage.local.set({ strategySettings: { ...s, perDomain: list } });
   document.getElementById("pattern").value = "";
   renderStrategies({ ...s, perDomain: list });
+  showToast("Override added");
 });
 
 document.getElementById("clearOverrides").addEventListener("click", async ()=>{
   const cfg = await api.storage.local.get(["strategySettings"]);
-  const s = cfg?.strategySettings || { global: "llmStrategy", perDomain: [] };
+  const s = cfg?.strategySettings || { global: "jsonLdStrategy", perDomain: [] };
   await api.storage.local.set({ strategySettings: { ...s, perDomain: [] } });
   renderStrategies({ ...s, perDomain: [] });
+  showToast("Overrides cleared");
 });
 
 log("options loaded");

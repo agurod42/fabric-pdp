@@ -14,6 +14,8 @@
       code { background:#f3f4f6; padding:2px 4px; border-radius:6px; }
       .row { display:flex; gap:8px; margin-top: 8px; }
       .tip { color:#374151; font-size: 14px; }
+      .toast { position: fixed; right: 16px; bottom: 16px; background: #064e3b; color: #ecfdf5; padding: 10px 14px; border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,0.2); opacity: 0; transform: translateY(12px); transition: opacity .2s ease, transform .2s ease; z-index: 9999; }
+      .toast.show { opacity: 1; transform: translateY(0); }
     </style>
   </head>
   <body>
@@ -43,6 +45,7 @@
       <button id="clear">Allow All (clear list)</button>
     </div>
     <ul id="list"></ul>
+    <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true" style="display:none"></div>
     <script src="index.js"></script>
   </body>
 </html>
