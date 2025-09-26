@@ -203,6 +203,10 @@ async function callLLM(payload) {
       throw e;
     }
     log("callLLM ← response", { traceId, status: resp.status, took_ms: Date.now() - t0, bytes: text?.length || 0, keys: Object.keys(plan || {}) });
+    // Surface backend error messages to the UI
+    if (plan && typeof plan.error === 'string' && plan.error.trim().length > 0) {
+      throw new Error(String(plan.error));
+    }
     if (!plan || typeof plan.is_pdp !== "boolean") {
       log("callLLM schema invalid", { traceId, keys: Object.keys(plan || {}) });
       throw new Error("Invalid plan schema");
