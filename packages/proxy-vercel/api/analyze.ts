@@ -72,9 +72,9 @@ Rules:
   - Ensure each selector matches EXACTLY ONE element in the provided html_excerpt. If multiple elements match, refine it with classes/ids/ancestor.
   - Include selector diagnostics in output where possible (e.g., fields.title.selector_note: 'unique in excerpt').
   - If there are multiple occurrences, set fields.<key>.selector to the PRIMARY/CANONICAL element (e.g., main PDP area), and cover other duplicates via extra patch steps.
-- Build a patch array with objects of the form { selector, op: "setText"|"setHTML", valueRef?: string, value?: string }.
-  - It is valid to have multiple patch steps for the same field (e.g., two different title locations) using the same valueRef (e.g., "fields.title.proposed").
-  - Prefer valueRef pointing to proposed fields. Use value only if you cannot reference a field.
+- Build a patch array with objects of the form { selector, op: "setText"|"setHTML", value: string }.
+  - It is valid to have multiple patch steps for the same field (e.g., two different title locations) using the same value text.
+  - Do NOT use valueRef. Always resolve the actual string to write and put it in 'value'.
 - Do not include scripts or external links. Keep HTML minimal (<p>, <ul>, <li>, <strong>, <em>).`;
 
       const messages = [
@@ -121,7 +121,7 @@ Rules:
       try { obj = JSON.parse(raw); } catch {}
       if (obj && typeof obj === 'object') {
         if (!Array.isArray(obj.warnings)) obj.warnings = [];
-        type PatchStep = { selector: string; op: "setText" | "setHTML"; valueRef?: string; value?: string };
+        type PatchStep = { selector: string; op: "setText" | "setHTML"; value?: string };
         const normalizePatch = (arr: any): PatchStep[] => {
           if (!Array.isArray(arr)) return [];
           const normalized: PatchStep[] = [];
@@ -151,14 +151,14 @@ Rules:
               const get = (path: string) => path.split(".").reduce((a: any, k: string) => (a == null ? a : a[k]), obj);
               let resolved = get(valueRef);
               if (typeof resolved === "string") {
-                out.valueRef = valueRef;
+                out.value = resolved;
                 normalized.push(out);
                 continue;
               }
               // Compatibility: if ref like fields.key.proposed, allow fallback to top-level key
               const m = /^fields\.(title|description|shipping|returns)\.proposed$/.exec(valueRef);
               if (m && typeof (obj as any)?.[m[1]] === "string") {
-                out.valueRef = valueRef; // client will handle the fallback
+                out.value = (obj as any)[m[1]];
                 normalized.push(out);
                 continue;
               }
