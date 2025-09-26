@@ -75,6 +75,17 @@ Rules:
   - Ensure each selector matches EXACTLY ONE element in the provided html_excerpt. If multiple elements match, refine it with classes/ids/ancestor.
   - Include selector diagnostics in output where possible (e.g., fields.title.selector_note: 'unique in excerpt').
   - If there are multiple occurrences, set fields.<key>.selector to the PRIMARY/CANONICAL element (e.g., main PDP area), and cover other duplicates via extra patch steps.
+
+- CRITICAL: Only target content-bearing nodes; never target labels/headings/tabs.
+  - Do NOT select elements whose text is a short section title/label (e.g., 'Description', 'Details', 'Specs', 'Shipping', 'Delivery', 'Returns', 'Return policy').
+  - Heuristic: if an element’s trimmed text is a short label (<= 20 chars) and matches common section names, do not modify it. Instead, select the container that holds the actual content (paragraphs or lists) for that section.
+  - Title: select the element that displays the product name in the main PDP area (often a single h1/h2). Do not select breadcrumbs, nav, tabs, or sidebar headings.
+  - Description: select the container with descriptive paragraphs, not the heading for that section.
+  - Shipping/Returns: select the container that holds the policy text (e.g., <ul>/<li> or <p> nodes) inside the corresponding section/panel. Do not select the section header/accordion trigger.
+  - If the content is in an accordion/tab, target the panel/body content, not the trigger/label.
+  - Prefer op=setText for title; prefer op=setHTML for description/shipping/returns so lists and paragraphs render correctly.
+  - If no safe content element exists for a field, leave that field's selector empty and omit patch steps for it.
+
 - Build a patch array with objects of the form { selector, op: "setText"|"setHTML", value: string }.
   - It is valid to have multiple patch steps for the same field (e.g., two different title locations) using the same value text.
   - Do NOT use valueRef. Always resolve the actual string to write and put it in 'value'.
