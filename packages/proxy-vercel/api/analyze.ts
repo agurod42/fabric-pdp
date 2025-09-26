@@ -113,7 +113,7 @@ Rules:
       const resp = await oai.chat.completions.create({
         model,
         messages,
-        temperature: 0.2,
+        temperature: 0,
         max_tokens: MAX_TOKENS,
         response_format: { type: "json_object" }
       });
