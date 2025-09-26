@@ -109,7 +109,7 @@ Rules:
 
       const maxTokensEnv = Number(process.env.LLM_MAX_TOKENS || "");
       const MAX_TOKENS = Number.isFinite(maxTokensEnv) && maxTokensEnv > 0 ? Math.min(Math.floor(maxTokensEnv), 32000) : 5000;
-      const model = process.env.LLM_MODEL || "gpt-4.1";
+      const model = process.env.LLM_MODEL || "gpt-4o";
       const resp = await oai.chat.completions.create({
         model,
         messages,
