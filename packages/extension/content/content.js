@@ -15,6 +15,30 @@ function getMeta() {
   };
 }
 
+function extractJsonLd(){
+  try {
+    const blocks = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+    const out = [];
+    for (const s of blocks){
+      let text = s.textContent || '';
+      if (!text) continue;
+      try {
+        // Some sites embed multiple JSON-LD objects in one script tag
+        const json = JSON.parse(text);
+        out.push(json);
+      } catch (e) {
+        // Attempt to recover by wrapping as array or stripping invalid trailing commas
+        try {
+          const fixed = text.replace(/,\s*([}\]])/g, '$1');
+          const json = JSON.parse(fixed);
+          out.push(json);
+        } catch {}
+      }
+    }
+    return out;
+  } catch { return []; }
+}
+
 function sanitizeHtmlFromDom() {
   try {
     const doc = document.cloneNode(true);
@@ -71,7 +95,8 @@ async function main() {
       title: document.title,
       meta: getMeta(),
       html_excerpt: sanitizeHtmlFromDom(),
-      language: document.documentElement.getAttribute("lang") || navigator.language || "en"
+    language: document.documentElement.getAttribute("lang") || navigator.language || "en",
+    jsonld: extractJsonLd()
     };
 
     const approx = {

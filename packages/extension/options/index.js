@@ -4,6 +4,7 @@ const DEBUG = true;
 const log = (...args) => { if (DEBUG) console.debug("[PDP][options]", ...args); };
 
 const STRATEGIES = [
+  { id: "jsonLdStrategy", label: "JSON-LD Strategy" },
   { id: "llmStrategy", label: "LLM Strategy" },
 ];
 
@@ -16,7 +17,7 @@ async function load(){
   log("load settings");
   const cfg = await api.storage.local.get(["whitelist","strategySettings"]);
   const wl = cfg?.whitelist || [];
-  const s = cfg?.strategySettings || { global: "llmStrategy", perDomain: [] };
+  const s = cfg?.strategySettings || { global: "jsonLdStrategy", perDomain: [] };
   renderWhitelist(wl);
   renderStrategies(s);
 }
@@ -46,7 +47,7 @@ function renderStrategies(s){
   fillStrategySelect(document.getElementById("globalStrategy"));
   fillStrategySelect(document.getElementById("domainStrategy"));
   const g = document.getElementById("globalStrategy");
-  if (g) g.value = s.global || "llmStrategy";
+  if (g) g.value = s.global || "jsonLdStrategy";
 
   const list = document.getElementById("overrides");
   list.innerHTML = "";
@@ -61,7 +62,7 @@ function renderStrategies(s){
     btn.addEventListener("click", async (e)=>{
       const i = parseInt(e.target.getAttribute("data-i"), 10);
       const cfg = await api.storage.local.get(["strategySettings"]);
-      const s = cfg?.strategySettings || { global: "llmStrategy", perDomain: [] };
+      const s = cfg?.strategySettings || { global: "jsonLdStrategy", perDomain: [] };
       const arr = Array.isArray(s.perDomain) ? s.perDomain : [];
       arr.splice(i,1);
       await api.storage.local.set({ strategySettings: { ...s, perDomain: arr } });
@@ -89,9 +90,9 @@ document.getElementById("clear").addEventListener("click", async ()=>{
 
 document.getElementById("saveGlobal").addEventListener("click", async ()=>{
   const select = document.getElementById("globalStrategy");
-  const id = select ? select.value : "llmStrategy";
+  const id = select ? select.value : "jsonLdStrategy";
   const cfg = await api.storage.local.get(["strategySettings"]);
-  const s = cfg?.strategySettings || { global: "llmStrategy", perDomain: [] };
+  const s = cfg?.strategySettings || { global: "jsonLdStrategy", perDomain: [] };
   await api.storage.local.set({ strategySettings: { ...s, global: id } });
   renderStrategies({ ...s, global: id });
 });
@@ -101,7 +102,7 @@ document.getElementById("addOverride").addEventListener("click", async ()=>{
   const strategyId = document.getElementById("domainStrategy").value;
   if (!pattern) return;
   const cfg = await api.storage.local.get(["strategySettings"]);
-  const s = cfg?.strategySettings || { global: "llmStrategy", perDomain: [] };
+  const s = cfg?.strategySettings || { global: "jsonLdStrategy", perDomain: [] };
   const list = Array.isArray(s.perDomain) ? s.perDomain : [];
   list.push({ pattern, strategyId });
   await api.storage.local.set({ strategySettings: { ...s, perDomain: list } });
