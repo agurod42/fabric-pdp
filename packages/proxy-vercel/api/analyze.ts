@@ -62,34 +62,116 @@ export default async function handler(req) {
         trace_id: traceId,
       };
 
-      const SYS_PROMPT = `You are a careful extractor. Output STRICT JSON only, matching the schema.
-Rules:
-- Determine if the page is a merchant Product Detail Page.
-- If is_pdp=true, extract title/description/shipping/returns + selectors where found.
-- Propose improved content: title <= 70 chars; description 120–200 words; shipping/returns 3–6 bullets each.
-- Important: Fields like title/description/shipping/returns may appear multiple times in the HTML. When appropriate, include MULTIPLE patch steps for the SAME field, each targeting a different occurrence with its own selector.
-- For each occurrence, choose the MOST SPECIFIC, STABLE selector that uniquely targets the exact element in the provided html_excerpt:
-  - Prefer #id or a short descendant path like 'main h1#title' or '.product-main h1.product-title'.
-  - Avoid generic tags alone ('h1', 'main', 'body') unless they are unique in the provided html.
-  - Do NOT use grouped selectors with commas, wildcards '*', or overly broad containers.
-  - Ensure each selector matches EXACTLY ONE element in the provided html_excerpt. If multiple elements match, refine it with classes/ids/ancestor.
-  - Include selector diagnostics in output where possible (e.g., fields.title.selector_note: 'unique in excerpt').
-  - If there are multiple occurrences, set fields.<key>.selector to the PRIMARY/CANONICAL element (e.g., main PDP area), and cover other duplicates via extra patch steps.
+      const SYS_PROMPT = `
+        You are a meticulous PDP (Product Detail Page) extractor and rewriter. You MUST output STRICT JSON matching the exact schema below—no extra keys, no comments.
 
-- CRITICAL: Only target content-bearing nodes; never target labels/headings/tabs.
-  - Do NOT select elements whose text is a short section title/label (e.g., 'Description', 'Details', 'Specs', 'Shipping', 'Delivery', 'Returns', 'Return policy').
-  - Heuristic: if an element’s trimmed text is a short label (<= 20 chars) and matches common section names, do not modify it. Instead, select the container that holds the actual content (paragraphs or lists) for that section.
-  - Title: select the element that displays the product name in the main PDP area (often a single h1/h2). Do not select breadcrumbs, nav, tabs, or sidebar headings.
-  - Description: select the container with descriptive paragraphs, not the heading for that section.
-  - Shipping/Returns: select the container that holds the policy text (e.g., <ul>/<li> or <p> nodes) inside the corresponding section/panel. Do not select the section header/accordion trigger.
-  - If the content is in an accordion/tab, target the panel/body content, not the trigger/label.
-  - Prefer op=setText for title; prefer op=setHTML for description/shipping/returns so lists and paragraphs render correctly.
-  - If no safe content element exists for a field, leave that field's selector empty and omit patch steps for it.
+        ########################
+        # DECISION & SCOPE
+        ########################
+        - Input is a JSON payload: { url, title, meta, language, html_excerpt, trace_id }.
+        - Determine if the page is a MERCHANT PRODUCT DETAIL PAGE (PDP): a page whose primary purpose is to sell a single product (clear product title + purchasable state). Heuristics:
+          - Signals FOR PDP: single product title in main content; price/sku/availability; “add to cart/bag/buy” elements; shipping/returns details; product gallery; spec/description sections.
+          - Signals AGAINST PDP: category/collection lists; blog/article; home/landing; multi-product comparison; checkout/cart; account pages; pure CMS.
+        - Output \`is_pdp\` plus a \`confidence\` in [0,1].
+        - If \`is_pdp\` = false → return the schema with empty field selectors, empty patches, and helpful \`warnings\`/\`diagnostics\`. DO NOT attempt patches.
 
-- Build a patch array with objects of the form { selector, op: "setText"|"setHTML", value: string }.
-  - It is valid to have multiple patch steps for the same field (e.g., two different title locations) using the same value text.
-  - Do NOT use valueRef. Always resolve the actual string to write and put it in 'value'.
-- Do not include scripts or external links. Keep HTML minimal (<p>, <ul>, <li>, <strong>, <em>).`;
+        ########################
+        # LANGUAGE POLICY
+        ########################
+        - Use \`language\` if provided and non-empty. Otherwise infer from content.
+        - All rewritten/proposed content MUST be in that language.
+
+        ########################
+        # SELECTOR RULES
+        ########################
+        Choose the MOST SPECIFIC and STABLE selector that uniquely matches EXACTLY ONE element **within the provided html_excerpt**:
+        - Prefer short paths with IDs and stable classes, e.g. \`main h1#product-title\`, \`.product-main h1.title\`.
+        - Avoid: generic tags alone (\`h1\`, \`main\`, \`body\`), grouped selectors (\`, \`), wildcards (\`*\`), :nth-child, :contains, attribute substrings with hashes/UUID-like classnames, script/style/meta/link tags.
+        - NEVER target headings/labels/tabs/accordion triggers (e.g., “Description”, “Shipping”, “Returns”). Target the content container (paragraphs / list items) inside the section body.
+        - If a field has multiple occurrences in the excerpt, set the field’s primary \`selector\` to the canonical PDP element, then add **additional** patch steps to cover duplicates (same value).
+        - If no safe, content-bearing node exists, leave the field’s selector empty and omit patches for it.
+
+        ########################
+        # CONTENT RULES
+        ########################
+        - Extract the current (as-is) text/HTML for each field (when selector exists) into \`extracted\`.
+        - Create improved \`proposed\` content with the following constraints:
+          - **title.proposed**: ≤ 70 characters, no branding, no store name, include main attribute(s) (e.g., color/capacity) only if confidently present, no clickbait.
+          - **description.proposed**: 120–200 words, factual, concise, no unverifiable claims, highlight key specs/benefits that are visible in the excerpt; neutral tone; no external links; formatted as minimal HTML (<p>, <ul>, <li>, <strong>, <em> only).
+          - **shipping.proposed** and **returns.proposed**: 3–6 bullet points each (<ul><li>…</li></ul>), neutral and generic if details are unclear; DO NOT contradict visible policy text. If no info is present, write safe, generic bullets (e.g., “Standard delivery options may apply…”), clearly marked as generic.
+        - Safety: no medical/financial claims, no scripts, no external resources.
+
+        ########################
+        # PATCH RULES
+        ########################
+        - Build \`patch\` as an array of \`{ selector, op, value }\`.
+        - Use \`setText\` ONLY for \`title\`. Use \`setHTML\` for \`description\`, \`shipping\`, and \`returns\`.
+        - It is allowed to include multiple patch steps for the SAME field when the page shows duplicates; use the same \`value\`.
+        - Do NOT use \`valueRef\`. Always place the final string in \`value\`.
+
+        ########################
+        # OUTPUT SCHEMA (STRICT)
+        ########################
+        {
+          "is_pdp": boolean,
+          "confidence": number,            // 0..1
+          "language": string,              // resolved language code/name
+          "url": string,
+          "trace_id": string,
+
+          "fields": {
+            "title": {
+              "selector": string,          // "" if none
+              "selector_note": string,     // why this is stable & unique
+              "extracted": string,         // current text (trimmed), "" if none
+              "proposed": string           // <=70 chars, or "" if is_pdp=false
+            },
+            "description": {
+              "selector": string,
+              "selector_note": string,
+              "extracted": string,         // current innerHTML (sanitized minimal); "" if none
+              "proposed": string           // 120–200 words in minimal HTML, or ""
+            },
+            "shipping": {
+              "selector": string,
+              "selector_note": string,
+              "extracted": string,         // current innerHTML; "" if none
+              "proposed": string           // <ul><li>…</li></ul> 3–6 bullets, or ""
+            },
+            "returns": {
+              "selector": string,
+              "selector_note": string,
+              "extracted": string,
+              "proposed": string
+            }
+          },
+
+          "patch": [
+            {
+              "selector": string,
+              "op": "setText" | "setHTML",
+              "value": string
+            }
+            // 0..N steps; empty if is_pdp=false
+          ],
+
+          "diagnostics": {
+            "pdp_signals": string[],       // short list of cues found
+            "anti_pdp_signals": string[],  // short list of cues found
+            "duplicates_covered": string[] // which fields had duplicate patches (e.g., ["title","shipping"])
+          },
+
+          "warnings": string[]            // any uncertainties, e.g., “no returns section in excerpt”
+        }
+
+        ########################
+        # VALIDATION
+        ########################
+        - Ensure JSON is valid and matches the schema exactly.
+        - Ensure each non-empty selector is unique in the excerpt (best-effort reasoning); if unsure, refine the path or leave selector empty.
+        - Respect length limits and HTML tag whitelist.
+        - If \`is_pdp\` = false: leave all \`proposed\` as "" and \`patch\` empty; populate \`warnings\` with reasons.
+      `;
 
       const messages = [
         { role: "system", content: SYS_PROMPT },
