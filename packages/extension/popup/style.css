@@ -6,6 +6,7 @@ h3 { margin: 0 0 8px; font-size: 16px; }
 .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; background:#fff; max-height: 160px; overflow: auto; font-size: 12px; }
 .label { font-size: 11px; color: #374151; margin-bottom: 4px; }
 .actions { display:flex; gap:8px; margin-top: 10px; }
+.actions.two button { flex: 1 1 50%; }
 button { padding: 6px 10px; border-radius: 8px; border:1px solid #d1d5db; background:#f9fafb; cursor:pointer; }
 button:hover { background:#f3f4f6; }
 small.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -15,3 +16,9 @@ small.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospa
 .summary .card { background:#f8fafc; max-height: 320px; overflow: auto; }
 .summary-row { margin-bottom: 4px; }
 .result { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color:#374151; white-space: normal; word-break: break-word; overflow: auto; text-overflow: clip; }
+/* diffs */
+.selector { margin: 2px 0 6px; color:#6b7280; }
+.diff-item { margin-bottom: 10px; }
+.diff-item > .label { font-size: 12px; font-weight: 600; color: #111827; }
+.diff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.divider { height: 1px; background: #e5e7eb; margin: 10px 0; }

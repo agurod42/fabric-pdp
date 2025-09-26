@@ -27,43 +27,51 @@ async function init(){
     bindOptions();
     return;
   }
-  if (!plan.is_pdp) {
-    app.innerHTML = `<div>This page doesn't look like a Product Detail Page.</div><div class="link"><a id="openOptions" href="#">Settings (whitelist)</a></div>`;
-    bindOptions();
-    return;
-  }
-  const sec = (label, f) => {
-    if (!f) return "";
-    const orig = (f.original ?? "(empty)");
-    const prop = (f.proposed ?? "(empty)");
+  const enc = (s) => { const d=document.createElement("div"); d.textContent=String(s ?? ""); return d.innerHTML; };
+  const renderFieldDiff = (key, label) => {
+    const f = plan.fields?.[key];
+    if (!f || !f.selector) return "";
+    const selector = enc(f.selector);
     const allowHTML = !!f.html;
-    const enc = s => { const d=document.createElement("div"); d.textContent=s; return d.innerHTML; };
+    const prev = typeof f.original === 'string' ? f.original : '';
+    const curr = typeof f.proposed === 'string' ? f.proposed : '';
+    const prevHtml = allowHTML ? prev : enc(prev);
+    const currHtml = allowHTML ? curr : enc(curr);
     return `
-    <div>
-      <div class="label">${label} — Original</div>
-      <div class="card">${enc(orig)}</div>
-    </div>
-    <div>
-      <div class="label">${label} — Rewritten</div>
-      <div class="card">${allowHTML ? prop : enc(prop)}</div>
-    </div>`;
+      <div class="diff-item">
+        <div class="label">${label}</div>
+        <div class="selector"><small class="mono">${selector}</small></div>
+        <div class="diff-grid">
+          <div>
+            <div class="label">Previous</div>
+            <div class="card">${prevHtml || '<span style="color:#6b7280">(empty)</span>'}</div>
+          </div>
+          <div>
+            <div class="label">Current</div>
+            <div class="card">${currHtml || '<span style="color:#6b7280">(empty)</span>'}</div>
+          </div>
+        </div>
+      </div>
+    `;
   };
 
+  const resultHeader = plan.is_pdp ? 'PDP detected' : 'No PDP detected';
+  const resultEmoji = plan.is_pdp ? '✅' : 'ℹ️';
   app.innerHTML = `
-    <h3>Detected PDP</h3>
-    <div class="status"><small class="mono">${url}</small></div>
+    <h3>${resultEmoji} ${resultHeader}</h3>
+    <div class="status"><small class="mono">${enc(url)}</small></div>
     <div id="error" class="error" style="display:none"></div>
-    <div id="summary" class="summary"></div>
-    <div class="grid">
-      ${sec("Title", plan.fields?.title)}
-      ${sec("Description", plan.fields?.description)}
-      ${sec("Shipping", plan.fields?.shipping)}
-      ${sec("Returns", plan.fields?.returns)}
+    <div id="diffs" class="diffs">
+      ${renderFieldDiff('title','Title')}
+      ${renderFieldDiff('description','Description')}
+      ${renderFieldDiff('shipping','Shipping')}
+      ${renderFieldDiff('returns','Returns')}
     </div>
-    <div class="actions">
+    <div class="actions two">
       <button id="revert" disabled>Revert</button>
       <button id="reapply" disabled>Re-apply</button>
     </div>
+    <div class="divider"></div>
     <div class="link"><a id="openOptions" href="#">Settings (whitelist)</a></div>
   `;
   bindOptions();
