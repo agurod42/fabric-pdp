@@ -76,7 +76,8 @@ export default async function handler(req) {
       }
 
       // Server-side truncation and payload slimming
-      const BUDGET = 60000; // reduce for faster responses
+      // Increase budget so product descriptions further down the DOM are included
+      const BUDGET = 100000; // aligned with content script MAX_HTML
       const safe = (s: any) => (typeof s === "string" ? s : "");
       const payload = {
         url: safe(url).slice(0, 2048),
