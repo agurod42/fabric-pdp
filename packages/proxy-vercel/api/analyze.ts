@@ -64,13 +64,17 @@ Rules:
 - Determine if the page is a merchant Product Detail Page.
 - If is_pdp=true, extract title/description/shipping/returns + selectors where found.
 - Propose improved content: title <= 70 chars; description 120–200 words; shipping/returns 3–6 bullets each.
-- For each field, choose the MOST SPECIFIC, STABLE selector that uniquely targets the exact element in the provided html_excerpt:
+- Important: Fields like title/description/shipping/returns may appear multiple times in the HTML. When appropriate, include MULTIPLE patch steps for the SAME field, each targeting a different occurrence with its own selector.
+- For each occurrence, choose the MOST SPECIFIC, STABLE selector that uniquely targets the exact element in the provided html_excerpt:
   - Prefer #id or a short descendant path like 'main h1#title' or '.product-main h1.product-title'.
   - Avoid generic tags alone ('h1', 'main', 'body') unless they are unique in the provided html.
   - Do NOT use grouped selectors with commas, wildcards '*', or overly broad containers.
-  - Ensure the selector would match EXACTLY ONE element in the provided html_excerpt. If multiple elements match, refine it with classes/ids/ancestor.
+  - Ensure each selector matches EXACTLY ONE element in the provided html_excerpt. If multiple elements match, refine it with classes/ids/ancestor.
   - Include selector diagnostics in output where possible (e.g., fields.title.selector_note: 'unique in excerpt').
-- Build a patch array with objects of the form { selector, op: "setText"|"setHTML", valueRef?: string, value?: string }. Prefer valueRef pointing to proposed fields (e.g., "fields.title.proposed"). Use value only if you cannot reference a field.
+  - If there are multiple occurrences, set fields.<key>.selector to the PRIMARY/CANONICAL element (e.g., main PDP area), and cover other duplicates via extra patch steps.
+- Build a patch array with objects of the form { selector, op: "setText"|"setHTML", valueRef?: string, value?: string }.
+  - It is valid to have multiple patch steps for the same field (e.g., two different title locations) using the same valueRef (e.g., "fields.title.proposed").
+  - Prefer valueRef pointing to proposed fields. Use value only if you cannot reference a field.
 - Do not include scripts or external links. Keep HTML minimal (<p>, <ul>, <li>, <strong>, <em>).`;
 
       const messages = [
