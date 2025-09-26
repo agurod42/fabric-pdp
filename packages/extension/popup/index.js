@@ -211,7 +211,8 @@ async function init(){
         for (const key of ["title","description","shipping","returns"]) {
           const f = plan.fields?.[key];
           if (f?.selector === r.selector) {
-            inv.patch.push({ selector: f.selector, op: (f.html ? "setHTML" : "setText"), valueRef: `fields.${key}.original`, noPrefix: true, allowEmpty: true });
+            const val = (typeof f.original === 'string') ? f.original : '';
+            inv.patch.push({ selector: f.selector, op: (f.html ? "setHTML" : "setText"), value: val, noPrefix: true, allowEmpty: true });
             break;
           }
         }
@@ -232,7 +233,8 @@ async function init(){
         for (const key of ["title","description","shipping","returns"]) {
           const f = plan.fields?.[key];
           if (f?.selector === r.selector) {
-            fwd.patch.push({ selector: f.selector, op: (f.html ? "setHTML" : "setText"), valueRef: `fields.${key}.proposed` });
+            const val = (typeof f.proposed === 'string') ? f.proposed : '';
+            fwd.patch.push({ selector: f.selector, op: (f.html ? "setHTML" : "setText"), value: val });
             break;
           }
         }
@@ -268,7 +270,8 @@ function makeInverse(plan){
   for (const key of ["title","description","shipping","returns"]) {
     const f = plan.fields?.[key];
     if (f?.selector) {
-      inv.patch.push({ selector: f.selector, op: (f.html ? "setHTML" : "setText"), valueRef: `fields.${key}.original` });
+      const val = (typeof f.original === 'string') ? f.original : '';
+      inv.patch.push({ selector: f.selector, op: (f.html ? "setHTML" : "setText"), value: val });
     }
   }
   log("inverse built", { steps: inv.patch.length });
