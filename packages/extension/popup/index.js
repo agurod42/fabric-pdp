@@ -9,11 +9,21 @@ async function init(){
   const url = tab.url;
   const tabId = tab.id;
   log("current tab", { url });
+  // Fetch any last error early so we can display it even if no plan is cached
+  let lastError = null;
+  try {
+    const { error } = await api.runtime.sendMessage({ type: "GET_LAST_ERROR", url, tabId });
+    if (error) lastError = error;
+  } catch {}
   const res = await api.runtime.sendMessage({ type: "GET_PLAN", url, tabId });
   const plan = res?.plan;
   const app = document.getElementById("app");
   if (!plan) {
-    app.innerHTML = `<div>No analysis cached for this page yet.</div><div class="link"><a id="openOptions" href="#">Settings (whitelist)</a></div>`;
+    const enc = s => { const d=document.createElement("div"); d.textContent=s; return d.innerHTML; };
+    const errBox = lastError
+      ? `<div id="error" class="error"><div class="card" style="background:#FDE8E8;color:#611A15;border:1px solid #F8B4B4"><strong>Proxy error</strong><div class="mono" style="white-space:pre-wrap">${enc(String(lastError))}</div></div></div>`
+      : `<div id="error" class="error" style="display:none"></div>`;
+    app.innerHTML = `${errBox}<div class="link"><a id="openOptions" href="#">Settings (whitelist)</a></div>`;
     bindOptions();
     return;
   }
