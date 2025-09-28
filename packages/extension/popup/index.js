@@ -184,40 +184,17 @@ async function init(){
         const [tab] = await api.tabs.query({ active:true, currentWindow:true });
         const tabId = tab?.id;
         if (tabId == null) return;
-        const [{ result }] = await api.scripting.executeScript({ target: { tabId }, func: () => {
-          const g = (n) => document.querySelector(`meta[property="${n}"], meta[name="${n}"]`)?.getAttribute("content") || null;
-          const meta = { ogTitle: g("og:title"), ogDescription: g("og:description"), twTitle: g("twitter:title"), twDescription: g("twitter:description") };
-          // inline a minimal copy of sanitize logic without stripping attributes extensively
-          const doc = document.cloneNode(true);
-          const body = doc.body || doc.documentElement;
-          ['script','style','noscript','template','iframe','object','embed','svg','canvas','picture','source'].forEach(tag => Array.from(body.querySelectorAll(tag)).forEach(n => n.remove()));
-          const walker = doc.createTreeWalker(body, NodeFilter.SHOW_COMMENT, null);
-          const comments = [];
-          while (walker.nextNode()) comments.push(walker.currentNode);
-          comments.forEach(c => c.parentNode && c.parentNode.removeChild(c));
-          const nodes = body.querySelectorAll('*');
-          nodes.forEach((el) => {
-            Array.from(el.attributes).forEach(attr => {
-              const name = attr.name.toLowerCase();
-              if (name.startsWith('on') || name === 'style') el.removeAttribute(attr.name);
-              if (name === 'href' && /^\s*javascript:/i.test(attr.value)) el.setAttribute('href', '#');
-            });
-          });
-          let html = (body.outerHTML || '').replace(/>\s+</g, '><').replace(/\s{2,}/g, ' ');
-          const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-          const url = URL.createObjectURL(blob);
-          return { url, meta };
-        }});
-        const { url: blobUrl } = result || {};
-        if (blobUrl) {
-          const filename = 'reduced-pdp.html';
-          try {
-            await api.downloads.download({ url: blobUrl, filename, saveAs: true });
-          } catch {
-            // Fallback to programmatic link click if downloads API blocked
-            const a = document.createElement('a');
-            a.href = blobUrl; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
-          }
+        // Ask content script for its reduced HTML
+        const { html, error } = await api.tabs.sendMessage(tabId, { type: 'GET_REDUCED_HTML' });
+        if (error) throw new Error(String(error));
+        const blob = new Blob([html || ''], { type: 'text/html;charset=utf-8' });
+        const blobUrl = URL.createObjectURL(blob);
+        const filename = 'reduced-pdp.html';
+        try {
+          await api.downloads.download({ url: blobUrl, filename, saveAs: true });
+        } catch {
+          const a = document.createElement('a');
+          a.href = blobUrl; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
         }
       } catch (err) {
         console.error('[PDP][popup] save html error', err);

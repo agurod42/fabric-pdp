@@ -1,17 +1,5 @@
 export const config = { runtime: "edge" };
-
-function jsonResponse(body, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-      "access-control-allow-origin": "*",
-      "access-control-allow-headers": "*",
-      "access-control-allow-methods": "POST, OPTIONS",
-    },
-  });
-}
+import { jsonResponse, createStream, safeString, buildOpenAIEnv, buildOpenAIHeaders } from "./_utils";
 
 export default async function handler(req) {
   const t0 = Date.now();
@@ -34,16 +22,7 @@ export default async function handler(req) {
   } catch {}
 
   // Prepare streaming response to send an early byte and avoid initial-response timeout
-  const { readable, writable } = new TransformStream();
-  const writer = writable.getWriter();
-  const encoder = new TextEncoder();
-  const headers = {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-    "access-control-allow-origin": "*",
-    "access-control-allow-headers": "*",
-    "access-control-allow-methods": "POST, OPTIONS",
-  } as Record<string, string>;
+  const { readable, writer, encoder, headers } = createStream();
 
   // Begin writing asynchronously
   (async () => {
@@ -189,9 +168,7 @@ export default async function handler(req) {
         });
       } catch {}
 
-      const OPENAI_BASE = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-      const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4.1";
-      const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+      const { base: OPENAI_BASE, model: OPENAI_MODEL, apiKey: OPENAI_API_KEY } = buildOpenAIEnv();
 
       try {
         console.debug("[PDP][api] llm config", {
@@ -210,11 +187,7 @@ export default async function handler(req) {
       }
 
       const tFetchStart = Date.now();
-      const headersInit: Record<string, string> = {
-        "content-type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-      };
-      if (traceId) headersInit["x-trace-id"] = traceId;
+      const headersInit: Record<string, string> = buildOpenAIHeaders(OPENAI_API_KEY, traceId);
       const resp = await fetch(`${OPENAI_BASE}/chat/completions`, {
         method: "POST",
         headers: headersInit,
