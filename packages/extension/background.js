@@ -32,6 +32,7 @@ async function cacheGet(key) {
 try { importScripts("strategies/llmStrategy.js"); } catch(e) { log("importScripts llmStrategy error", e); }
 try { importScripts("strategies/jsonLdStrategy.js"); } catch(e) { log("importScripts jsonLdStrategy error", e); }
 try { importScripts("page/applyPatchInPage.js"); } catch(e) { log("importScripts applyPatchInPage error", e); }
+try { importScripts("utils/utils.js"); } catch(e) { log("importScripts utils error", e); }
 
 const STRATEGY_DEFAULT_ID = "jsonLdStrategy";
 const STRATEGY_REGISTRY = {
@@ -171,7 +172,7 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg.type === "SHOULD_RUN") {
         const cfg = await api.storage.local.get(["whitelist"]);
         const wl = cfg?.whitelist || [];
-        const ok = shouldRun(msg.url, wl);
+        const ok = (typeof self.shouldRun === 'function') ? self.shouldRun(msg.url, wl) : shouldRun(msg.url, wl);
         log("SHOULD_RUN", { url: msg.url, whitelistCount: wl.length, ok });
         sendResponse({ ok }); return;
       }
@@ -235,7 +236,7 @@ async function resolvePlanWithStrategy(payload, tabId){
 
 
 async function generateValues(input){
-  const traceId = makeTraceId();
+  const traceId = (typeof self.makeTraceId === 'function') ? self.makeTraceId() : makeTraceId();
   const body = JSON.stringify({ ...input, trace_id: traceId });
   const resp = await fetch(PROXY_GENERATE_URL, {
     method: "POST",
@@ -253,31 +254,7 @@ async function generateValues(input){
   }
 }
 
-function shouldRun(urlStr, wl) {
-  if (!Array.isArray(wl) || wl.length === 0) return true;
-  try {
-    const host = new URL(urlStr).hostname;
-    return wl.some(p => new RegExp(patternToRegex(p)).test(host));
-  } catch { return false; }
-}
-function patternToRegex(pattern) {
-  return "^" + pattern.replace(/\./g,"\\.").replace(/\*/g,".*") + "$";
-}
-
-function makeTraceId() {
-  try {
-    const arr = new Uint8Array(8);
-    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-      crypto.getRandomValues(arr);
-    } else {
-      for (let i = 0; i < arr.length; i++) arr[i] = Math.floor(Math.random() * 256);
-    }
-    const hex = Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
-    return `pdp-${hex}`;
-  } catch {
-    return `pdp-${Date.now().toString(16)}`;
-  }
-}
+// moved to utils/utils.js
 
 async function callLLM(payload) {
   const t0 = Date.now();
