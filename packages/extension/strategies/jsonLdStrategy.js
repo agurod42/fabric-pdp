@@ -7,17 +7,31 @@ async function resolveViaJsonLd(payload, ctx){
   if (!product) {
     return { ...planBase, is_pdp: false, patch: [], fields: {} };
   }
+
   const extracted = extractProductTexts(product);
+
+  // Build content targets (real values) and separate match targets (can use seeds)
   const targets = {};
   if (extracted.title) targets.title = extracted.title;
+
+  // Prefer JSON-LD description, else meta fallbacks
+  const metaDesc = (payload?.meta?.ogDescription || payload?.meta?.twDescription || "").trim();
   if (extracted.description) targets.description = extracted.description;
+  else if (metaDesc) targets.description = metaDesc;
+
   if (extracted.shipping) targets.shipping = extracted.shipping;
   if (extracted.returns) targets.returns = extracted.returns;
+
+  const matchTargets = { ...targets };
+  // Seed labels to locate containers even when content text is missing from JSON-LD
+  if (!matchTargets.description || matchTargets.description.length < 20) matchTargets.description = "description details";
+  if (!matchTargets.shipping) matchTargets.shipping = "shipping delivery";
+  if (!matchTargets.returns) matchTargets.returns = "returns return policy";
 
   let matches = {};
   try {
     if (typeof ctx?.tabId === 'number') {
-      const results = await api.scripting.executeScript({ target: { tabId: ctx.tabId }, func: findSelectorsForTargets, args: [targets] });
+      const results = await api.scripting.executeScript({ target: { tabId: ctx.tabId }, func: findSelectorsForTargets, args: [matchTargets] });
       matches = Array.isArray(results) ? (results[0]?.result || {}) : {};
     }
   } catch (e) {
@@ -42,14 +56,13 @@ async function resolveViaJsonLd(payload, ctx){
   const fields = {};
   const patch = [];
   const ensureObj = (v) => (v && typeof v === 'object') ? v : {};
-  const addField = (key, label) => {
+  const addField = (key) => {
     const sel = ensureObj(matches[key]).selector;
-    const raw = typeof generated[key] === 'string' && generated[key] ? generated[key] : (targets[key] || "");
+    const raw = (typeof generated[key] === 'string' && generated[key]) ? generated[key] : (targets[key] || "");
     if (typeof sel === 'string' && sel && typeof raw === 'string' && raw) {
-      const val = raw; // prefixing is handled at apply time via applyPatchInPage ensurePrefixed
       const isHtml = (key === 'description' || key === 'shipping' || key === 'returns');
-      fields[key] = { selector: sel, html: isHtml, proposed: val };
-      patch.push({ selector: sel, op: isHtml ? "setHTML" : "setText", value: val });
+      fields[key] = { selector: sel, html: isHtml, proposed: raw };
+      patch.push({ selector: sel, op: isHtml ? "setHTML" : "setText", value: raw });
     }
   };
   addField('title');
@@ -78,25 +91,53 @@ function pickFirstProduct(jsonlds){
 
 function extractProductTexts(p){
   const getFirstString = (v) => {
-    if (typeof v === 'string') return v;
-    if (Array.isArray(v)) return String(v.find(x => typeof x === 'string') || '');
-    if (v && typeof v === 'object' && typeof v['@value'] === 'string') return v['@value'];
+    try {
+      if (typeof v === 'string') return v;
+      if (Array.isArray(v)) {
+        // Prefer first string, else look for @value in objects
+        const s = v.find(x => typeof x === 'string');
+        if (typeof s === 'string') return s;
+        for (const obj of v) {
+          if (obj && typeof obj === 'object') {
+            if (typeof obj['@value'] === 'string') return obj['@value'];
+            if (typeof obj['name'] === 'string') return obj['name'];
+            if (typeof obj['description'] === 'string') return obj['description'];
+          }
+        }
+        return '';
+      }
+      if (v && typeof v === 'object') {
+        if (typeof v['@value'] === 'string') return v['@value'];
+        if (typeof v['name'] === 'string') return v['name'];
+        if (typeof v['description'] === 'string') return v['description'];
+      }
+    } catch {}
     return '';
   };
   const name = getFirstString(p.name) || getFirstString(p.title);
   const description = getFirstString(p.description);
-  // Shipping - best effort from offers.shippingDetails or shippingLabel/terms
+
+  // Shipping - best effort from offers.shippingDetails or related fields
   let shipping = '';
   try {
     const offers = Array.isArray(p.offers) ? p.offers[0] : p.offers;
-    const sd = offers?.shippingDetails || offers?.hasDeliveryMethod;
-    shipping = getFirstString(sd?.shippingLabel) || getFirstString(sd?.transitTime) || getFirstString(sd?.name) || '';
+    const sd = offers?.shippingDetails || offers?.hasDeliveryMethod || p.shippingDetails;
+    shipping = getFirstString(sd?.shippingLabel)
+      || getFirstString(sd?.transitTime)
+      || getFirstString(sd?.name)
+      || '';
   } catch {}
-  // Returns - best effort from hasMerchantReturnPolicy
+
+  // Returns - best effort from hasMerchantReturnPolicy (product or offers level)
   let returns = '';
   try {
-    const rp = p.hasMerchantReturnPolicy || p.returnPolicy || p.merchantReturnPolicy;
-    returns = getFirstString(rp?.returnPolicyCategory) || getFirstString(rp?.name) || getFirstString(rp?.returnPolicySeasonalOverride) || '';
+    const offers = Array.isArray(p.offers) ? p.offers[0] : p.offers;
+    const rp = p.hasMerchantReturnPolicy || p.returnPolicy || p.merchantReturnPolicy || offers?.hasMerchantReturnPolicy;
+    returns = getFirstString(rp?.returnPolicyCategory)
+      || getFirstString(rp?.name)
+      || getFirstString(rp?.returnPolicySeasonalOverride)
+      || getFirstString(rp?.returnPolicy)
+      || '';
   } catch {}
   return { title: name, description, shipping, returns };
 }
@@ -192,18 +233,49 @@ function findSelectorsForTargets(targets){
     }
     return parts.join(' > ');
   }
-  const tags = ['h1','h2','h3','p','div','span','li','dd','dt','strong','em'];
+  const tags = ['h1','h2','h3','p','div','span','li','dd','dt','strong','em','a','button','section','article','td','th'];
   const candidates = Array.from(document.querySelectorAll(tags.join(',')))
     .filter(el => isVisible(el))
     .map(el => ({ el, text: (el.textContent||'').trim() }))
     .filter(x => x.text.length >= 2);
+  const headingLike = new Set(['h1','h2','h3','dt','strong','th']);
+
+  function expandToContentIfLabel(el){
+    try {
+      const tag = (el.tagName || '').toLowerCase();
+      const txt = (el.textContent || '').trim();
+      const labelish = /\b(description|details|shipping|delivery|return|returns|polic(y|ies))\b/i.test(txt);
+      if (!labelish && !headingLike.has(tag)) return el;
+      let best = null; let bestScore = 0;
+      // Look at next siblings up to 4 hops for the largest visible text container
+      let hop = 0; let node = el.nextElementSibling;
+      while (node && hop < 4){
+        if (isVisible(node)){
+          const t = (node.textContent||'').trim();
+          const len = t.length;
+          if (len > bestScore) { bestScore = len; best = node; }
+        }
+        node = node.nextElementSibling; hop++;
+      }
+      if (best && bestScore >= 30) return best;
+      // Fallback: a descendant with longest text
+      const desc = Array.from(el.parentElement ? el.parentElement.querySelectorAll('p,div,li,dd,span') : [])
+        .filter(n => isVisible(n))
+        .map(n => ({ n, l: (n.textContent||'').trim().length }))
+        .sort((a,b)=>b.l-a.l);
+      if (desc.length && desc[0].l >= 30) return desc[0].n;
+    } catch {}
+    return el;
+  }
   const out = {};
   for (const [key, target] of Object.entries(targets || {})){
     let best = { score: 0, selector: '' };
     for (const c of candidates){
       const s = scoreMatch(c.text, target);
       if (s > best.score){
-        best = { score: s, selector: cssPath(c.el) };
+        // If the match looks like a label, prefer adjacent content container
+        const anchor = expandToContentIfLabel(c.el);
+        best = { score: s, selector: cssPath(anchor) };
       }
     }
     if (best.selector) out[key] = { selector: best.selector, score: best.score };
