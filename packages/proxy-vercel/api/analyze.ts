@@ -20,6 +20,17 @@ type ChunkResult = {
   patch?: PatchStep[];
 };
 
+function isDisallowedSelector(sel: string): boolean {
+  if (!sel || typeof sel !== "string") return true;
+  const s = sel.trim();
+  // Block obvious non-product areas and branding/nav/footer selectors
+  const badCtx = /(\b|[#.\-])(header|nav|navbar|logo|branding|breadcrumb|footer|menu|account|login|signup|search|newsletter|cart|bag)(\b|[#.\-])/i;
+  if (badCtx.test(s)) return true;
+  // Block selectors that directly target <img>
+  if (/^(\s*img\b)|([>\s]img\b)/i.test(s)) return true;
+  return false;
+}
+
 async function chatJSON(
   base: string,
   model: string,
@@ -199,11 +210,41 @@ You are a Product Detail Page (PDP) extractor and rewriter. Assume the overall p
 You receive ONLY a fragment of pre-trimmed HTML. For THIS fragment:
 - If a field is present (title, description, shipping, returns), output ONE best candidate in "fields".
 - You may include MULTIPLE patch steps per field (e.g., duplicates in UI).
-- Rules:
-  • title.proposed ≤ 70 chars, no branding; use "setText"
-  • description.proposed 120–200 words, minimal HTML (<p>, <ul>, <li>, <strong>, <em>); use "setHTML"
-  • shipping/returns proposed as <ul><li>…</li></ul> (generic if unclear from fragment); use "setHTML"
-- Choose stable, specific selectors that uniquely match within THIS fragment; avoid wildcards, :nth-child, triggers; for shipping/returns target content containers (not tabs/buttons).
+
+HARD EXCLUSIONS (never select from these):
+- Tags/areas: header, nav, footer, aside, breadcrumb, menu, modal, drawer, offcanvas
+- Elements whose id/class contains: logo, brand, branding, navbar, header, breadcrumb, footer, menu, cart, bag, account, login, signup, search, newsletter
+- Any <img> alt/title/aria-label/data-* attribute values (do not read attributes as content)
+- Anchors linking to home/root (href="/" or root domain) or brand pages
+
+TITLE SELECTION (strict):
+- Prefer a product-specific <h1> within the main/product container; fallback to a strong <h2> only if it is clearly the product name.
+- Must be visible text content (not attributes), 3–120 chars, not equal to the site or brand name, and not just a category or collection.
+- Favor nodes within a container whose ancestors indicate product context (class/id with "product", near price/SKU/variants).
+- Reject candidates located inside excluded areas or with class/id indicating branding or navigation.
+
+DESCRIPTION SELECTION:
+- Prefer the primary product description container with paragraph-rich text; > 40 words of meaningful copy.
+- Allow minimal HTML only: <p>, <ul>, <li>, <strong>, <em>.
+- Exclude marketing banners, policy footers, or sitewide generic text; avoid content under footer/header/nav.
+
+SHIPPING/RETURNS SELECTION:
+- Prefer content containers (panels/sections) actually holding the text (NOT the tab/button/trigger).
+- Accept generic bullet points only if the fragment lacks concrete policy text.
+- Exclude footer sitewide policy links; use content adjacent to the product area when possible.
+
+SELECTOR RULES (very strict):
+- Choose stable, specific selectors that uniquely match within THIS fragment.
+- Prefer id or a short, descriptive class chain; avoid wildcard selectors, :nth-child, attribute starts-with/contains hacks, or targeting buttons/toggles.
+- Target content containers (for description/shipping/returns), not triggers.
+- Provide a short selector_note explaining WHY this selector is the product field and what was excluded (e.g., "excluded header .logo title").
+
+OUTPUT RULES:
+- Proposed values:
+  • title.proposed ≤ 70 chars, remove branding words; use "setText"
+  • description.proposed 120–200 words, minimal HTML; use "setHTML"
+  • shipping/returns proposed as <ul><li>…</li></ul> (generic if unclear); use "setHTML"
+- If you are NOT confident a field is present, omit it entirely. Do NOT hallucinate.
 - Output STRICT JSON with ONLY:
 {
   "fields": {
@@ -248,6 +289,7 @@ You receive ONLY a fragment of pre-trimmed HTML. For THIS fragment:
             const note = typeof x.selector_note === "string" ? x.selector_note : "";
             const extracted = typeof x.extracted === "string" ? x.extracted : "";
             const proposed = typeof x.proposed === "string" ? x.proposed : "";
+            if (isDisallowedSelector(sel)) return undefined;
             return { selector: sel, selector_note: note, extracted, proposed };
           };
 
@@ -268,6 +310,7 @@ You receive ONLY a fragment of pre-trimmed HTML. For THIS fragment:
             const value = typeof st.value === "string" ? st.value : "";
             if (!value) continue;
             if (/^meta(\{|\[|\.|\s|$)/i.test(st.selector)) continue;
+            if (isDisallowedSelector(st.selector)) continue;
             patch.push({ selector: st.selector, op, value });
           }
 
