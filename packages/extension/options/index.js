@@ -7,7 +7,7 @@ const log = (...args) => { if (DEBUG) console.debug("[PDP][options]", ...args); 
 /** Available strategy choices displayed in selects. */
 const STRATEGIES = [
   { id: "heuristicsStrategy", label: "Heuristics (very fast, local)" },
-  { id: "llmStrategy", label: "Backend LLM (fallback)" },
+  { id: "llmStrategy", label: "Backend LLM (more accurate, remote)" },
 ];
 
 /** Fill a <select> with strategy options. */
