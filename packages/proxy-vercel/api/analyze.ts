@@ -239,11 +239,13 @@ SHIPPING/RETURNS SELECTION:
 - Accept generic bullet points only if the fragment lacks concrete policy text.
 - Exclude footer sitewide policy links; use content adjacent to the product area when possible.
 
- SELECTOR RULES (very strict):
-- Choose stable, specific selectors that uniquely match within THIS fragment.
-- Prefer id or a short, descriptive class chain; avoid wildcard selectors, :nth-child, attribute starts-with/contains hacks, or targeting buttons/toggles.
-- Target content containers (for description/shipping/returns), not triggers.
-- Provide a short selector_note explaining WHY this selector is the product field and what was excluded (e.g., "excluded header .logo title").
+ SELECTOR RULES (very strict and deterministic):
+ - The selector MUST match at least one element in THIS fragment.
+ - Prefer a single id if present (e.g., #product-title). If not, prefer a short class chain of 1–2 classes that are semantic and likely stable (e.g., .product .title). Avoid positional selectors.
+ - Allowed attributes for targeting are limited to: id, class, data-testid, data-test, itemprop, aria-label, aria-labelledby. Do NOT use contains/starts-with attribute hacks.
+ - DO NOT use :nth-child, :nth-of-type, :not(), wildcard *, or selectors that target button/tab triggers.
+ - Target content containers (for description/shipping/returns), not triggers.
+ - Provide a short selector_note explaining WHY this selector is the product field and what was excluded (e.g., "excluded header .logo title").
 
 OUTPUT RULES:
 - Proposed values:
@@ -302,11 +304,25 @@ OUTPUT RULES:
             return { selector: sel, selector_note: note, extracted, proposed };
           };
 
+          const validateSelectorInFragment = (sel) => {
+            try {
+              if (typeof sel !== "string" || !sel.trim()) return false;
+              // Very minimal CSS selector existence check within fragment using DOMParser
+              const doc = new DOMParser().parseFromString(`<div id="root">${frag}</div>`, "text/html");
+              const root = doc.getElementById("root");
+              if (!root) return false;
+              return !!root.querySelector(sel);
+            } catch { return false; }
+          };
+          const nfTitle = normField(f.title);
+          const nfDesc = normField(f.description);
+          const nfShip = normField(f.shipping);
+          const nfRet = normField(f.returns);
           const fields = {
-            title: normField(f.title),
-            description: normField(f.description),
-            shipping: normField(f.shipping),
-            returns: normField(f.returns),
+            title: (nfTitle && validateSelectorInFragment(nfTitle.selector)) ? nfTitle : undefined,
+            description: (nfDesc && validateSelectorInFragment(nfDesc.selector)) ? nfDesc : undefined,
+            shipping: (nfShip && validateSelectorInFragment(nfShip.selector)) ? nfShip : undefined,
+            returns: (nfRet && validateSelectorInFragment(nfRet.selector)) ? nfRet : undefined,
           };
 
           // Normalize patches

@@ -22,7 +22,7 @@ export function createStream() {
 
 export function buildOpenAIEnv() {
   const base = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-  const model = process.env.OPENAI_MODEL || "gpt-4o";
+  const model = process.env.OPENAI_MODEL || "gpt-5";
   const apiKey = process.env.OPENAI_API_KEY || "";
   return { base, model, apiKey };
 }

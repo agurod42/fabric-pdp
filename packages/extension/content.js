@@ -56,12 +56,21 @@ function sanitizeHtmlFromDom() {
     while (walker.nextNode()) comments.push(walker.currentNode);
     comments.forEach(c => c.parentNode && c.parentNode.removeChild(c));
 
-    // Strip all attributes except id and class
+    // Strip all attributes except id, class, and a small whitelist that helps stable selectors
     const nodes = [body, ...body.querySelectorAll('*')];
     nodes.forEach((el) => {
       Array.from(el.attributes || []).forEach(attr => {
         const name = attr.name.toLowerCase();
-        if (name !== 'id' && name !== 'class') {
+        const allowed = (
+          name === 'id' ||
+          name === 'class' ||
+          name === 'data-testid' ||
+          name === 'data-test' ||
+          name === 'itemprop' ||
+          name === 'aria-label' ||
+          name === 'aria-labelledby'
+        );
+        if (!allowed) {
           el.removeAttribute(attr.name);
         }
       });
