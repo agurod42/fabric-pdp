@@ -27,7 +27,7 @@ async function chatJSON(
   traceId: string,
   messages: Array<{ role: "system" | "user"; content: string }>,
   maxTokens = 800,
-  timeoutMs = 10000
+  timeoutMs = 45000
 ): Promise<ChunkResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("timeout"), timeoutMs);
@@ -219,7 +219,7 @@ You receive ONLY a fragment of pre-trimmed HTML. For THIS fragment:
               { role: "user", content: user },
             ],
             900,
-            10000
+            45000
           );
 
           // Normalize fields
