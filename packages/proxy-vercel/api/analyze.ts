@@ -26,6 +26,9 @@ function isDisallowedSelector(sel: string): boolean {
   // Block obvious non-product areas and branding/nav/footer selectors
   const badCtx = /(\b|[#.\-])(header|nav|navbar|logo|branding|breadcrumb|footer|menu|account|login|signup|search|newsletter|cart|bag)(\b|[#.\-])/i;
   if (badCtx.test(s)) return true;
+  // Block selectors that likely indicate non-content UI/branding/metadata
+  const uiNoise = /(\b|[#.\-])(icon|badge|label|sku|variant|size|color|swatch|price|pricing|quantity|qty|social|share|cookie|payment|paypal|applepay|klarna|afterpay|visa|mastercard)(\b|[#.\-])/i;
+  if (uiNoise.test(s)) return true;
   // Block selectors that directly target <img>
   if (/^(\s*img\b)|([>\s]img\b)/i.test(s)) return true;
   return false;
@@ -172,7 +175,7 @@ export default async function handler(req: Request) {
   if (req.method === "OPTIONS") return jsonResponse({}, 204);
   if (req.method !== "POST") return jsonResponse({ error: "Use POST" }, 405);
 
-  const { url, title, meta, html_excerpt, language, trace_id } = await req.json().catch(() => ({}));
+  const { url, title, meta, html_excerpt, language, jsonld, trace_id } = await req.json().catch(() => ({}));
   const traceId = typeof trace_id === "string" ? trace_id : "";
 
   const { readable, writer, encoder, headers } = createStream();
@@ -189,6 +192,7 @@ export default async function handler(req: Request) {
         language: safe(language),
         // FRONTEND already sent trimmed HTML
         html_excerpt: safe(html_excerpt),
+        jsonld: Array.isArray(jsonld) || (jsonld && typeof jsonld === "object") ? jsonld : [],
         trace_id: traceId,
       };
 
@@ -211,9 +215,11 @@ You receive ONLY a fragment of pre-trimmed HTML. For THIS fragment:
 - If a field is present (title, description, shipping, returns), output ONE best candidate in "fields".
 - You may include MULTIPLE patch steps per field (e.g., duplicates in UI).
 
+You may use provided context hints (page_title, meta, jsonld) to disambiguate what is product content, but DO NOT copy those hints verbatim as page content. Extract only from the HTML fragment.
+
 HARD EXCLUSIONS (never select from these):
 - Tags/areas: header, nav, footer, aside, breadcrumb, menu, modal, drawer, offcanvas
-- Elements whose id/class contains: logo, brand, branding, navbar, header, breadcrumb, footer, menu, cart, bag, account, login, signup, search, newsletter
+- Elements whose id/class contains: logo, brand, branding, navbar, header, breadcrumb, footer, menu, cart, bag, account, login, signup, search, newsletter, icon, badge, label, sku, variant, size, color, price, social, share, cookie, payment
 - Any <img> alt/title/aria-label/data-* attribute values (do not read attributes as content)
 - Anchors linking to home/root (href="/" or root domain) or brand pages
 
@@ -233,7 +239,7 @@ SHIPPING/RETURNS SELECTION:
 - Accept generic bullet points only if the fragment lacks concrete policy text.
 - Exclude footer sitewide policy links; use content adjacent to the product area when possible.
 
-SELECTOR RULES (very strict):
+ SELECTOR RULES (very strict):
 - Choose stable, specific selectors that uniquely match within THIS fragment.
 - Prefer id or a short, descriptive class chain; avoid wildcard selectors, :nth-child, attribute starts-with/contains hacks, or targeting buttons/toggles.
 - Target content containers (for description/shipping/returns), not triggers.
@@ -262,9 +268,12 @@ OUTPUT RULES:
         chunks,
         NUM_PROCESSES,
         async (frag, idx) => {
-          const user = JSON.stringify({
+            const user = JSON.stringify({
             url: payload.url,
             language: payload.language,
+            page_title: payload.title,
+            meta: payload.meta,
+            jsonld: payload.jsonld,
             fragment_index: idx,
             html_fragment: frag,
           });
@@ -301,20 +310,8 @@ OUTPUT RULES:
           };
 
           // Normalize patches
-          const rawPatch = Array.isArray(out?.patch) ? out.patch : [];
-          const patch: PatchStep[] = [];
-          for (const st of rawPatch) {
-            if (!st || typeof st.selector !== "string") continue;
-            const op = st.op === "setText" || st.op === "setHTML" ? st.op : null;
-            if (!op) continue;
-            const value = typeof st.value === "string" ? st.value : "";
-            if (!value) continue;
-            if (/^meta(\{|\[|\.|\s|$)/i.test(st.selector)) continue;
-            if (isDisallowedSelector(st.selector)) continue;
-            patch.push({ selector: st.selector, op, value });
-          }
-
-          return { fields, patch } as ChunkResult;
+          // Ignore free-form LLM patches at the chunk level; we will build safe patches from final fields later
+          return { fields, patch: [] } as ChunkResult;
         }
       );
 
@@ -341,7 +338,27 @@ OUTPUT RULES:
         returns: pickBestField(retCands),
       };
 
-      const patch = mergePatches(allPatchLists);
+      // Build a conservative patch strictly from the chosen fields.
+      const patch: PatchStep[] = [];
+      try {
+        const addIfValid = (selector: string, op: "setText" | "setHTML", value: string) => {
+          if (!selector || !value) return;
+          if (isDisallowedSelector(selector)) return;
+          patch.push({ selector, op, value });
+        };
+        if (fields.title?.selector && fields.title.proposed) {
+          addIfValid(fields.title.selector, "setText", fields.title.proposed);
+        }
+        if (fields.description?.selector && fields.description.proposed) {
+          addIfValid(fields.description.selector, "setHTML", fields.description.proposed);
+        }
+        if (fields.shipping?.selector && fields.shipping.proposed) {
+          addIfValid(fields.shipping.selector, "setHTML", fields.shipping.proposed);
+        }
+        if (fields.returns?.selector && fields.returns.proposed) {
+          addIfValid(fields.returns.selector, "setHTML", fields.returns.proposed);
+        }
+      } catch {}
 
       // Final minimal schema (no diagnostics, no warnings)
       const response = {
