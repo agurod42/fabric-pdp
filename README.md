@@ -59,6 +59,13 @@ sequenceDiagram
 
 Patch operations are restricted to `setText` and `setHTML`, with a selector denylist and automatic value prefixing (`[PDP]`) unless explicitly suppressed internally.
 
+#### llmStrategy pipeline (performance‑oriented)
+1. Pre‑check: a fast PDP signal evaluator can short‑circuit non‑PDP pages (no LLM call).
+2. Reduce: content script builds a minimized, sanitized HTML excerpt + minimal metadata.
+3. Chunk + parallelize: Edge `analyze` splits HTML into N fragments and queries the model concurrently with strict JSON output.
+4. Normalize + merge: per‑chunk candidates are validated, then the best per field is selected.
+5. Synthesize minimal patch: build safe `setText`/`setHTML` steps only from final fields.
+
 #### Strategies
 - `heuristicsStrategy`: Fast signal scoring and selector discovery; may return empty patches.
 - `llmStrategy`: Uses the Edge API to return a strict JSON plan.
