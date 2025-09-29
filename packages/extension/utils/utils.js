@@ -49,6 +49,13 @@ function evaluatePdpSignals(payload) {
     const title = String(payload?.title || "");
     const url = String(payload?.url || "");
 
+    // Root page: treat as non-PDP
+    try {
+      const u = new URL(url);
+      const path = String(u.pathname || "");
+      if (path === "/" || path === "") return { score: -10 };
+    } catch {}
+
     // Quick anti routes
     if (/\b(cart|checkout|basket|account|orders?|login|register|help|support|search)\b/i.test(url)) return { score: -10 };
 
