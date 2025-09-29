@@ -186,6 +186,46 @@ async function init(){
     }
   } catch {}
 
+  // Keep UI state in sync: poll processing + plan + last error a few times
+  // to catch race conditions between popup opening and background finishing
+  try {
+    let attempts = 0;
+    const maxAttempts = 8;
+    const intervalMs = 400;
+    const timer = setInterval(async () => {
+      attempts++;
+      try {
+        const [{ processing: p }, planRes, errRes] = await Promise.all([
+          api.runtime.sendMessage({ type: "GET_PROCESSING", tabId }),
+          api.runtime.sendMessage({ type: "GET_PLAN", url, tabId }),
+          api.runtime.sendMessage({ type: "GET_LAST_ERROR", url, tabId })
+        ]);
+        const proc = !!p;
+        const planNow = planRes?.plan;
+        const errNow = (typeof errRes?.error === 'string') ? errRes.error : null;
+        const procBox = document.getElementById("processing");
+        if (procBox) procBox.style.display = proc ? "block" : "none";
+        const errBox = document.getElementById("error");
+        if (errBox && errNow) {
+          errBox.style.display = "block";
+          const enc = (s) => { const d=document.createElement("div"); d.textContent=s; return d.innerHTML; };
+          errBox.innerHTML = `<div class="card" style="background:#FDE8E8;color:#611A15;border:1px solid #F8B4B4"><strong>Backend error</strong><div class="mono" style="white-space:pre-wrap">${enc(String(errNow))}</div></div>`;
+          const diffsEl = document.getElementById("diffs"); if (diffsEl) diffsEl.style.display = "none";
+          const actionsRightEl = document.getElementById("actionsRight"); if (actionsRightEl) actionsRightEl.style.display = "none";
+        }
+        // If a plan appears after initial render, refresh the popup to render diffs
+        if (!plan && planNow) {
+          clearInterval(timer);
+          window.location.reload();
+          return;
+        }
+        if (attempts >= maxAttempts || (!proc && (plan || errNow))) {
+          clearInterval(timer);
+        }
+      } catch {}
+    }, intervalMs);
+  } catch {}
+
   const revertBtn = document.getElementById("revert");
   const reapplyBtn = document.getElementById("reapply");
   const saveHtmlLink = document.getElementById("saveHtml");
