@@ -50,7 +50,7 @@ async function chatJSON(
       headers: buildOpenAIHeaders(apiKey, traceId),
       body: JSON.stringify({
         model,
-        temperature: model === "gpt-5" ? 1 : 0,
+        temperature: (!model.startsWith("gpt-") || model === "gpt-5") ? 1 : 0,
         stream: false,
         response_format: { type: "json_object" },
         messages,
