@@ -54,7 +54,6 @@ async function chatJSON(
         temperature: 0,
         stream: false,
         response_format: { type: "json_object" },
-        max_tokens: maxTokens,
         messages,
       }),
       signal: controller.signal,
@@ -307,8 +306,10 @@ OUTPUT RULES:
           const validateSelectorInFragment = (sel) => {
             try {
               if (typeof sel !== "string" || !sel.trim()) return false;
+              // In Edge runtime there is no DOMParser; if unavailable, skip strict validation
+              if (typeof (globalThis as any).DOMParser === 'undefined') return true;
               // Very minimal CSS selector existence check within fragment using DOMParser
-              const doc = new DOMParser().parseFromString(`<div id="root">${frag}</div>`, "text/html");
+              const doc = new (globalThis as any).DOMParser().parseFromString(`<div id="root">${frag}</div>`, "text/html");
               const root = doc.getElementById("root");
               if (!root) return false;
               return !!root.querySelector(sel);
