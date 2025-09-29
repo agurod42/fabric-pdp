@@ -228,6 +228,7 @@ TITLE SELECTION (strict):
 - Reject candidates located inside excluded areas or with class/id indicating branding or navigation.
 
 DESCRIPTION SELECTION:
+- Treat sections headed by phrases like "About this item", "Product details", "Overview", "Key features" as valid description containers. If a heading like these is present, prefer the next content block (paragraphs or a <ul> list) as the description when it contains substantive product-specific information.
 - Prefer the primary product description container with paragraph-rich text; > 40 words of meaningful copy.
 - Allow minimal HTML only: <p>, <ul>, <li>, <strong>, <em>.
 - Exclude marketing banners, policy footers, or sitewide generic text; avoid content under footer/header/nav.
