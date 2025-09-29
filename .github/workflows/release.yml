@@ -1,0 +1,60 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  package:
+    name: Package Chrome and Safari builds
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Prepare Chrome zip
+        working-directory: packages/extension
+        run: |
+          zip -r ../../pdp-rewriter-chrome.zip . -x "**/node_modules/**" "**/.DS_Store"
+
+      - name: Install Xcode tools (safari-web-extension-converter)
+        run: |
+          xcodebuild -version
+          which xcrun
+
+      - name: Generate Safari project
+        run: |
+          mkdir -p build-safari
+          xcrun safari-web-extension-converter "$PWD/packages/extension" \
+            --app-name "PDP Rewriter" \
+            --project-location "$PWD/build-safari" \
+            --copy-resources --no-open --force --macos-only
+          # tar the Xcode project directory for upload
+          tar -czf pdp-rewriter-safari-project.tgz -C build-safari .
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            pdp-rewriter-chrome.zip
+            pdp-rewriter-safari-project.tgz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
