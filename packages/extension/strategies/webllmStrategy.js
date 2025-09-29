@@ -25,7 +25,7 @@
         func: async () => {
           try {
             if (window.WebLLM || window.webllm) return 'present';
-            const mod = await import('https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm/+esm');
+            const mod = await import('https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm');
             // Expose to page globals for later detection
             window.webllm = mod;
             return (mod && typeof mod.createChat === 'function') ? 'loaded' : 'loaded_no_createChat';
