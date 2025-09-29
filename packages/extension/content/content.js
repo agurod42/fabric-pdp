@@ -179,9 +179,30 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const t0 = Date.now();
         const payload = msg.payload || {};
         log('RUN_WEBLLM_ANALYZE start', { url: payload?.url, html_len: typeof payload?.html_excerpt === 'string' ? payload.html_excerpt.length : 0 });
-        const glb = (window.WebLLM || window.webllm);
-        if (!glb) throw new Error('WebLLM not loaded');
-        const createChat = (glb.createChat ? glb.createChat : (glb.ChatModule && glb.ChatModule.createChat ? glb.ChatModule.createChat : null));
+        // Wait for WebLLM global if it is still initializing
+        async function waitForWebLLM(timeoutMs){
+          const deadline = Date.now() + timeoutMs;
+          const has = () => (window.WebLLM || window.webllm);
+          while (Date.now() < deadline) {
+            const g = has(); if (g) return g;
+            await new Promise(r => setTimeout(r, 200));
+          }
+          return has();
+        }
+        let webllmGlobal = (window.WebLLM || window.webllm);
+        if (!webllmGlobal) {
+          webllmGlobal = await waitForWebLLM(15000);
+          if (!webllmGlobal) {
+            try {
+              const keys = Object.keys(window).filter(k => /llm|mlc/i.test(k)).slice(0, 12);
+              log('WebLLM globals not found', { keys });
+            } catch {}
+          }
+        }
+        const glbName = webllmGlobal === window.WebLLM ? 'WebLLM' : (webllmGlobal === window.webllm ? 'webllm' : 'unknown');
+        if (webllmGlobal) log('WebLLM global detected', { name: glbName, hasCreateChat: !!webllmGlobal.createChat, hasChatModule: !!(webllmGlobal.ChatModule && webllmGlobal.ChatModule.createChat) });
+        if (!webllmGlobal) throw new Error('WebLLM not loaded');
+        const createChat = (webllmGlobal.createChat ? webllmGlobal.createChat : (webllmGlobal.ChatModule && webllmGlobal.ChatModule.createChat ? webllmGlobal.ChatModule.createChat : null));
         if (!createChat) throw new Error('WebLLM createChat not available');
         const model = 'Llama-3-8B-Instruct-q4f32_1-MLC';
         const chat = await createChat({ model });

@@ -7,8 +7,52 @@
   const DEBUG = true;
   const log = (...args) => { if (DEBUG) console.debug("[PDP][webllm]", ...args); };
 
-  // No dynamic injection needed when using content_scripts
-  async function ensureWebLLM(/* tabId */){ return true; }
+  // Ensure WebLLM is available in the page by injecting from CDN if missing
+  async function ensureWebLLM(tabId){
+    try {
+      // First, quick check in the isolated world
+      const probe = await api.scripting.executeScript({
+        target: { tabId },
+        func: () => Boolean(window.WebLLM || window.webllm)
+      });
+      const present = Array.isArray(probe) ? !!probe[0]?.result : false;
+      if (present) return true;
+
+      // Load ESM module from jsDelivr in the MAIN world so page CSP applies
+      const results = await api.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        func: async () => {
+          try {
+            if (window.WebLLM || window.webllm) return 'present';
+            const mod = await import('https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm/+esm');
+            // Expose to page globals for later detection
+            window.webllm = mod;
+            return (mod && typeof mod.createChat === 'function') ? 'loaded' : 'loaded_no_createChat';
+          } catch (e) {
+            return `error:${String(e && e.message || e)}`;
+          }
+        }
+      });
+      const status = Array.isArray(results) ? String(results[0]?.result || '') : '';
+      if (status.startsWith('error:')) { log('ensureWebLLM load error', status); return false; }
+
+      // Verify availability again (either name)
+      const verify = await api.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const g = (window.WebLLM || window.webllm);
+          const hasCreate = !!(g && (g.createChat || (g.ChatModule && g.ChatModule.createChat)));
+          return { hasGlobal: !!g, hasCreate };
+        }
+      });
+      const v = Array.isArray(verify) ? (verify[0]?.result || {}) : {};
+      return !!v.hasGlobal && !!v.hasCreate;
+    } catch (e) {
+      log('ensureWebLLM fatal', String(e && e.message || e));
+      return false;
+    }
+  }
 
   // Build the same system prompt used by backend
   function buildSystemPrompt(){
