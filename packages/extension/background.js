@@ -40,19 +40,25 @@ async function cacheGet(key) {
 
 // Load strategies as separate modules into the service worker global scope
 try { importScripts("page/applyPatchInPage.js"); } catch(e) { log("importScripts applyPatchInPage error", e); }
-try { importScripts("strategies/llmStrategy.js"); } catch(e) { log("importScripts llmStrategy error", e); }
 try { importScripts("strategies/heuristicsStrategy.js"); } catch(e) { log("importScripts heuristicsStrategy error", e); }
+try { importScripts("strategies/llmStrategy.js"); } catch(e) { log("importScripts llmStrategy error", e); }
+try { importScripts("strategies/webllmStrategy.js"); } catch(e) { log("importScripts webllmStrategy error", e); }
 try { importScripts("utils/utils.js"); } catch(e) { log("importScripts utils error", e); }
 
-const STRATEGY_DEFAULT_ID = "llmStrategy";
+const STRATEGY_DEFAULT_ID = "webllmStrategy";
 const STRATEGY_REGISTRY = {
+  heuristicsStrategy: async (payload, ctx) => {
+    if (typeof self.heuristicsStrategy === 'function') return await self.heuristicsStrategy(payload, ctx);
+    // Fallback: if missing, delegate to LLM
+    return await callLLM(payload);
+  },
   // Strategy ID: resolver function. Signature: (payload, ctx) => Promise<plan>
   llmStrategy: async (payload /*, ctx */) => {
     return await (self.llmStrategy ? self.llmStrategy(payload) : callLLM(payload));
   },
-  heuristicsStrategy: async (payload, ctx) => {
-    if (typeof self.heuristicsStrategy === 'function') return await self.heuristicsStrategy(payload, ctx);
-    // Fallback: if missing, delegate to LLM
+  webllmStrategy: async (payload, ctx) => {
+    if (typeof self.webllmStrategy === 'function') return await self.webllmStrategy(payload, ctx);
+    // Fallback to backend if webllm strategy not present
     return await callLLM(payload);
   },
 };

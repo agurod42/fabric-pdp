@@ -32,6 +32,7 @@
         "<all_urls>"
       ],
       "js": [
+        "vendor/webllm.min.js",
         "content/content.js"
       ],
       "run_at": "document_idle"
@@ -45,7 +46,8 @@
     {
       "resources": [
         "icons/*",
-        "popup/*"
+        "popup/*",
+        "vendor/*"
       ],
       "matches": [
         "<all_urls>"

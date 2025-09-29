@@ -1,11 +1,12 @@
 // strategies/heuristicsStrategy.js — Fast heuristic PDP detector and selector finder
 // Implements a staged scoring approach and returns a plan compatible with LLM output
 // Signature: async function heuristicsStrategy(payload, ctx) => plan
+(function(){
 const api = (typeof browser !== 'undefined') ? browser : chrome;
 
 /** Utility: robust text getter */
 function textOf(el){
-	try { return (el && typeof el.textContent === 'string') ? el.textContent.trim() : ""; } catch { return ""; }
+    try { return (el && typeof el.textContent === 'string') ? el.textContent.trim() : ""; } catch { return ""; }
 }
 
 /** Build a minimal scoring evaluation on a reduced HTML string plus meta fields. */
@@ -238,5 +239,4 @@ async function heuristicsStrategy(payload, ctx){
 }
 
 self.heuristicsStrategy = heuristicsStrategy;
-
-
+})();
