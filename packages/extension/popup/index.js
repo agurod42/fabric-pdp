@@ -49,34 +49,34 @@ async function init(){
     if (summary && typeof summary === 'object') latestSummary = summary;
   } catch {}
 
-  /** Render diff for a single field with selector and prev/current panes. */
+  /** Render diff for a single field ONLY if it has at least one applied patch. */
   const renderFieldDiff = (key, label) => {
     const f = plan.fields?.[key] || {};
     const hasSelector = typeof f.selector === 'string' && f.selector.length > 0;
     const selector = hasSelector ? enc(f.selector) : '<span style="color:#6b7280">(no selector)</span>';
     const allowHTML = !!f.html;
-    // If no selector, only show label + selector note, skip prev/current panes
+    // If no selector, skip entirely (show only applied patches)
     if (!hasSelector) {
-      return `
-      <div class="diff-item">
-        <div class="label">${label}</div>
-        <div class="selector"><small class="mono">${selector}</small></div>
-      </div>
-      `;
+      return '';
     }
-    const prev = typeof f.original === 'string' ? f.original : '';
-    // Prefer applied value from summary (post-patch), else fall back to proposed/top-level
-    let applied = '';
+    // Require at least one applied patch for this selector
+    let appliedForField = [];
     try {
-      if (hasSelector && latestSummary && Array.isArray(latestSummary.results)) {
-        const r = latestSummary.results.find(r => r && r.status === 'applied' && r.selector === f.selector && typeof r.value === 'string');
-        if (r && typeof r.value === 'string') applied = r.value;
+      if (latestSummary && Array.isArray(latestSummary.results)) {
+        appliedForField = latestSummary.results.filter(r => r && r.status === 'applied' && r.selector === f.selector);
       }
     } catch {}
-    let curr = '';
-    if (typeof applied === 'string' && applied.length > 0) curr = applied;
-    else if (typeof f.proposed === 'string') curr = f.proposed;
-    else if (typeof plan[key] === 'string') curr = plan[key];
+    if (!appliedForField || appliedForField.length === 0) {
+      return '';
+    }
+    const prev = typeof f.original === 'string' ? f.original : '';
+    // Use applied value from summary (post-patch)
+    let applied = '';
+    try {
+      const r = appliedForField[0];
+      if (r && typeof r.value === 'string') applied = r.value;
+    } catch {}
+    const curr = (typeof applied === 'string' && applied.length > 0) ? applied : '';
 
     const prevHtml = allowHTML ? prev : enc(prev);
     const currHtml = allowHTML ? curr : enc(curr);
@@ -108,22 +108,7 @@ async function init(){
   const strategyStr = strategyIdVal
     ? `<div class="status"><strong>Strategy:</strong> <code>${enc(strategyIdVal)}</code>${fallback ? ` <span title=\"${enc(fallbackReason)}\" style=\"color:#B45309\">(fallback)</span>` : ''}</div>`
     : (fallback ? `<div class="status"><strong>Strategy:</strong> <span style=\"color:#B45309\">fallback</span></div>` : '');
-  // Build list of additional applied changes beyond the primary field selectors
-  let extraAppliedHtml = '';
-  try {
-    if (latestSummary && Array.isArray(latestSummary.results)) {
-      const primarySelectors = new Set(["title","description","shipping","returns"].map(k => plan.fields?.[k]?.selector).filter(Boolean));
-      const extras = latestSummary.results.filter(r => r && r.status === 'applied' && r.selector && !primarySelectors.has(r.selector));
-      if (extras.length > 0) {
-        const items = extras.map(r => {
-          const val = (typeof r.value === 'string') ? r.value : '';
-          const show = val ? enc(val) : '<span style="color:#6b7280">(no value)</span>';
-          return `<div class="result"><code>${enc(r.op)}</code> <code>${enc(r.selector)}</code><div class="card">${show}</div></div>`;
-        }).join("");
-        extraAppliedHtml = `<div class="divider"></div><div class="extras"><div class="label">Additional applied changes</div>${items}</div>`;
-      }
-    }
-  } catch {}
+  // Removed separate "Additional applied changes" section; patches are grouped per field.
 
   app.innerHTML = `
     <div class="topbar">
@@ -151,7 +136,6 @@ async function init(){
       ${renderFieldDiff('shipping','Shipping')}
       ${renderFieldDiff('returns','Returns')}
     </div>
-    ${extraAppliedHtml}
     <div class="divider"></div>
     <div class="link"><a id="openOptions" href="#">Settings</a></div>
   `;
@@ -235,11 +219,25 @@ async function init(){
   const hasPrev = Array.isArray(latestSummary?.results) && latestSummary.results.some(r => typeof r.prev === 'string');
 
   // Enable revert only if there were applied steps
-  if (hasApplied) revertBtn.removeAttribute('disabled');
+  if (hasApplied && revertBtn) revertBtn.removeAttribute('disabled');
   // Enable re-apply only if we can revert (i.e., have prev snapshots)
-  if (hasPrev) reapplyBtn.removeAttribute('disabled');
+  if (hasPrev && reapplyBtn) reapplyBtn.removeAttribute('disabled');
   // Show actions only when we have a result (applied steps)
   if (actionsRight) actionsRight.style.display = hasApplied ? 'flex' : 'none';
+
+  // Poll once after a short delay to enable buttons if background just applied
+  try {
+    setTimeout(async () => {
+      try {
+        const { summary } = await api.runtime.sendMessage({ type: "GET_APPLY_SUMMARY", url, tabId });
+        const applied = Array.isArray(summary?.results) && summary.results.some(r => r.status === 'applied');
+        const prevOk = Array.isArray(summary?.results) && summary.results.some(r => typeof r.prev === 'string');
+        if (applied && revertBtn) revertBtn.removeAttribute('disabled');
+        if (prevOk && reapplyBtn) reapplyBtn.removeAttribute('disabled');
+        if (actionsRight) actionsRight.style.display = applied ? 'flex' : 'none';
+      } catch {}
+    }, 300);
+  } catch {}
 
   if (saveHtmlLink) {
     saveHtmlLink.addEventListener('click', async (e) => {
@@ -313,7 +311,7 @@ async function init(){
     return fwd;
   }
 
-  revertBtn.addEventListener("click", async () => {
+  revertBtn && revertBtn.addEventListener("click", async () => {
     if (!latestSummary) return;
     const inverse = buildRevertFromSummary(plan, latestSummary);
     log("revert clicked", { steps: inverse.patch.length });
@@ -323,7 +321,7 @@ async function init(){
     window.close();
   });
 
-  reapplyBtn.addEventListener("click", async () => {
+  reapplyBtn && reapplyBtn.addEventListener("click", async () => {
     if (!latestSummary) return;
     const forward = buildReapplyFromSummary(plan, latestSummary);
     log("reapply clicked", { steps: forward.patch.length });

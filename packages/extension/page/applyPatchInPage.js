@@ -29,7 +29,17 @@ function applyPatchInPage(plan) {
       }
       else if (step.op === "setHTML") {
         entry.prev = String(node.innerHTML ?? "");
-        node.innerHTML = outVal; entry.status = "applied"; entry.value = outVal; log("setHTML", step.selector);
+        try {
+          if (window.trustedTypes && window.trustedTypes.createPolicy) {
+            const policy = window.trustedTypes.createPolicy('pdp-allow', { createHTML: (s) => s });
+            node.innerHTML = policy.createHTML(outVal);
+          } else {
+            node.innerHTML = outVal;
+          }
+          entry.status = "applied"; entry.value = outVal; log("setHTML", step.selector);
+        } catch(e) {
+          entry.status = "error"; entry.note = String(e);
+        }
       }
       else { entry.status = "skipped"; entry.note = "unknown op"; log("unknown op", step.op); }
     } catch(e){ entry.status = "error"; entry.note = String(e); }

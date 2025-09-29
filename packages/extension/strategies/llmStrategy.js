@@ -24,8 +24,24 @@ async function callLLM(payload) {
     const resp = await fetch(PROXY_URL, { method: "POST", headers: { "Content-Type": "application/json", "x-trace-id": traceId }, body });
     const text = await resp.text();
     let plan;
-    try { plan = JSON.parse(text); } catch(e) {
-      throw e;
+    try {
+      // Normal path
+      plan = JSON.parse(text);
+    } catch (e) {
+      // Fallback: attempt to extract first JSON object from noisy payload
+      try {
+        const start = text.indexOf('{');
+        const end = text.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+          const obj = text.slice(start, end + 1);
+          plan = JSON.parse(obj);
+        } else {
+          throw e;
+        }
+      } catch (e2) {
+        const snippet = text.slice(0, 320);
+        throw new Error(`Invalid JSON from proxy (traceId=${traceId}): ${String(e2 && e2.message || e2)}\n---\n${snippet}`);
+      }
     }
     if (plan && typeof plan.error === 'string' && plan.error.trim().length > 0) {
       throw new Error(String(plan.error));

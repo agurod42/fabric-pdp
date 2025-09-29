@@ -118,16 +118,32 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         log("APPLY_PATCH start", { tabId, steps });
         try {
           if (tabId != null) { try { await setBadge("AP", tabId); } catch {} }
-          const exec = async () => {
-            const res = await api.scripting.executeScript({ target: { tabId, allFrames: true }, world: 'MAIN', func: self.applyPatchInPage || applyPatchInPage, args: [msg.plan] });
-            return Array.isArray(res) ? (res[0]?.result ?? null) : null;
+          const pickSummary = (arr) => {
+            if (!Array.isArray(arr)) return null;
+            try {
+              const main = arr.find(r => r && typeof r.frameId === 'number' && r.frameId === 0 && r.result);
+              if (main && main.result) return main.result;
+              const anyApplied = arr.find(r => r && r.result && r.result.steps_applied > 0);
+              if (anyApplied && anyApplied.result) return anyApplied.result;
+              return arr[0]?.result ?? null;
+            } catch { return arr[0]?.result ?? null; }
           };
-          let summary = await exec();
+          const execWithWorld = async (world) => {
+            const res = await api.scripting.executeScript({ target: { tabId, allFrames: true }, world, func: self.applyPatchInPage || applyPatchInPage, args: [msg.plan] });
+            return pickSummary(res);
+          };
+          let summary = await execWithWorld('ISOLATED');
           // If nothing applied but there are steps, retry once after a short delay (late-loading DOMs)
           try {
             if (summary && summary.steps_total > 0 && summary.steps_applied === 0) {
               await new Promise(r => setTimeout(r, 1200));
-              summary = await exec();
+              summary = await execWithWorld('ISOLATED');
+            }
+          } catch {}
+          // If still nothing applied and steps exist, try MAIN world as a fallback
+          try {
+            if (steps > 0 && (!summary || summary.steps_applied === 0)) {
+              summary = await execWithWorld('MAIN');
             }
           } catch {}
           log("APPLY_PATCH done", { took_ms: Date.now() - t0, summary });
