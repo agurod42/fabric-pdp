@@ -32,7 +32,7 @@
         "<all_urls>"
       ],
       "js": [
-        "content/content.js"
+        "content.js"
       ],
       "run_at": "document_idle"
     }
