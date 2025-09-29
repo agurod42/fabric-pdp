@@ -40,8 +40,7 @@ async function chatJSON(
   apiKey: string,
   traceId: string,
   messages: Array<{ role: "system" | "user"; content: string }>,
-  maxTokens = 800,
-  timeoutMs = 45000
+  timeoutMs = 60000
 ): Promise<ChunkResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("timeout"), timeoutMs);
@@ -286,9 +285,7 @@ OUTPUT RULES:
             [
               { role: "system", content: CHUNK_SYS },
               { role: "user", content: user },
-            ],
-            900,
-            45000
+            ]
           );
 
           // Normalize fields
