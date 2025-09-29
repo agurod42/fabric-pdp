@@ -1,8 +1,9 @@
 function applyPatchInPage(plan) {
   const log = () => {};
   const deny = /(?:<script|javascript:|on\w+=|<iframe|<object)/i;
-  const PREFIX = "[PDP] ";
-  const ensurePrefixed = (s) => (typeof s === "string" && !s.startsWith(PREFIX)) ? (PREFIX + s) : s;
+  // Success-like styling similar to the extension's green badge palette
+  const WRAP_STYLE = "background:#ECFDF5;color:#065F46;border:1px solid #A7F3D0;padding:4px 6px;border-radius:6px;display:inline-block;";
+  const wrapHtml = (innerHtml) => `<div data-pdp="1" style="${WRAP_STYLE}">${innerHtml}</div>`;
   const t0 = Date.now();
   const steps = Array.isArray(plan.patch) ? plan.patch : [];
   const results = [];
@@ -15,28 +16,44 @@ function applyPatchInPage(plan) {
       if (!node) { entry.status = "skipped"; entry.note = "selector not found"; log("selector not found", step.selector); results.push(entry); continue; }
       let val = "";
       const allowEmpty = !!step.allowEmpty;
-      const noPrefix = !!step.noPrefix;
+      const noPrefix = !!step.noPrefix; // Back-compat: if set, do not wrap
       if (typeof step.value === "string") {
         val = step.value;
       }
       if (typeof val !== "string") { entry.status = "skipped"; entry.note = "value not string"; log("value not string", step.selector); results.push(entry); continue; }
       if (val.length === 0 && !allowEmpty) { entry.status = "skipped"; entry.note = "empty value"; log("empty value", step.selector); results.push(entry); continue; }
       if (deny.test(val)) { entry.status = "skipped"; entry.note = "value denied by policy"; log("value denied", step.selector); results.push(entry); continue; }
-      const outVal = noPrefix ? val : ensurePrefixed(val);
+      const shouldWrap = !noPrefix;
       if (step.op === "setText") {
         entry.prev = String(node.textContent ?? "");
-        node.textContent = outVal; entry.status = "applied"; entry.value = outVal; log("setText", step.selector);
+        if (shouldWrap) {
+          try {
+            while (node.firstChild) node.removeChild(node.firstChild);
+            const wrapper = document.createElement('div');
+            wrapper.setAttribute('data-pdp', '1');
+            wrapper.setAttribute('role', 'note');
+            wrapper.style.cssText = WRAP_STYLE;
+            wrapper.textContent = val;
+            node.appendChild(wrapper);
+            entry.status = "applied"; entry.value = val; log("setText(wrap)", step.selector);
+          } catch (e) {
+            entry.status = "error"; entry.note = String(e);
+          }
+        } else {
+          node.textContent = val; entry.status = "applied"; entry.value = val; log("setText", step.selector);
+        }
       }
       else if (step.op === "setHTML") {
         entry.prev = String(node.innerHTML ?? "");
         try {
+          const htmlToSet = shouldWrap ? wrapHtml(val) : val;
           if (window.trustedTypes && window.trustedTypes.createPolicy) {
             const policy = window.trustedTypes.createPolicy('pdp-allow', { createHTML: (s) => s });
-            node.innerHTML = policy.createHTML(outVal);
+            node.innerHTML = policy.createHTML(htmlToSet);
           } else {
-            node.innerHTML = outVal;
+            node.innerHTML = htmlToSet;
           }
-          entry.status = "applied"; entry.value = outVal; log("setHTML", step.selector);
+          entry.status = "applied"; entry.value = htmlToSet; log(shouldWrap ? "setHTML(wrap)" : "setHTML", step.selector);
         } catch(e) {
           entry.status = "error"; entry.note = String(e);
         }
