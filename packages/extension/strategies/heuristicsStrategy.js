@@ -52,18 +52,30 @@ async function discoverSelectorsInPage(tabId){
 					if (titleEl && visible(titleEl)) out.title = pickSelector(titleEl);
 
 					// Description candidates (EN + ES)
-					const descCandidates = Array.from(document.querySelectorAll('[itemprop="description"], .product-description, .product__description, #description, [id*="description" i], [class*="description" i], #descripcion, [id*="descripci" i], [class*="descripci" i]'));
+					// Broaden to include common headings/containers like "About this item", "Product details", "Overview", "Specifications"
+					const descCandidates = Array.from(document.querySelectorAll('[itemprop="description"], .product-description, .product__description, #description, [id*="description" i], [class*="description" i], #descripcion, [id*="descripci" i], [class*="descripci" i], [id*="about" i], [class*="about" i], [id*="details" i], [class*="details" i], [id*="overview" i], [class*="overview" i], [id*="specifications" i], [class*="specifications" i]'));
 					let descEl = preferLongestText(descCandidates);
 					// Fallback: pick a visible text block near title with decent length
 					if (!descEl && titleEl) {
 						const scope = titleEl.closest('section, main, article') || document.body;
 						// Prefer blocks preceded by headings with EN/ES description hints
-						const blocks = Array.from(scope.querySelectorAll('p, div, section')).filter(e => visible(e) && txt(e).length >= 120);
+						// Include lists (ul) commonly used under headings like "About this item"
+						const blocks = Array.from(scope.querySelectorAll('p, div, section, ul')).filter(e => {
+							if (!visible(e)) return false;
+							if (e.tagName && e.tagName.toLowerCase() === 'ul') {
+								// Accept meaningful bullet lists with at least 3 items or decent text
+								const items = e.querySelectorAll('li');
+								if (items.length >= 3) return true;
+							}
+							return txt(e).length >= 120;
+						});
 						const headingHint = (el) => {
 							let prev = el.previousElementSibling, hops = 0;
 							while (prev && hops < 4) {
 								if (/^h[1-6]$|^summary$|^button$/i.test(prev.tagName)) {
 									const t = txt(prev).toLowerCase();
+									// Strong bonus for exact phrases seen on major retailers (e.g., Amazon)
+									if (/(about\s+this\s+item|product\s+details|key\s+features)/i.test(t)) return 5;
 									if (/(description|details|about|product|overview|specifications)|(descripci[oó]n|detalles|acerca|resumen|caracter[ií]sticas|especificaciones)/i.test(t)) return 3;
 								}
 								prev = prev.previousElementSibling; hops++;
@@ -72,12 +84,28 @@ async function discoverSelectorsInPage(tabId){
 						};
 						let best = null, bestScore = 0;
 						for (const b of blocks){
+							const isUl = b.tagName && b.tagName.toLowerCase() === 'ul';
 							const len = txt(b).length;
 							const bonus = headingHint(b);
-							const s = len + bonus * 200;
+							// Give additional weight to ULs when preceded by a strong heading (e.g., "About this item")
+							const listBoost = isUl && bonus >= 3 ? 400 : 0;
+							const s = len + bonus * 200 + listBoost;
 							if (s > bestScore) { best = b; bestScore = s; }
 						}
 						descEl = best;
+					}
+					// If still not found, explicitly look for headings like "About this item" and pick the next content block
+					if (!descEl) {
+						const heading = Array.from((document.querySelectorAll('h1,h2,h3,h4,h5,summary,button') || [])).find(h => {
+							const t = txt(h).toLowerCase();
+							return /(about\s+this\s+item|product\s+details|key\s+features|overview|specifications)/i.test(t);
+						});
+						if (heading) {
+							let sib = heading.nextElementSibling;
+							// Skip over trivial siblings like icons/images
+							while (sib && (/^(svg|img|picture)$/i.test(sib.tagName))) sib = sib.nextElementSibling;
+							if (sib && visible(sib)) descEl = sib;
+						}
 					}
 					if (descEl) out.description = pickSelector(descEl);
 
@@ -190,10 +218,10 @@ async function buildPlan(payload, isPdp, score, ctx){
 
 /** Main entry for background: fast PDP detection with optional LLM fallback upstream */
 async function heuristicsStrategy(payload, ctx){
-    const { score } = evaluateSignals(payload);
-	const isPdp = score >= 6;
-	if (score <= 0) return await buildPlan(payload, false, score, ctx);
-	return await buildPlan(payload, isPdp, score, ctx);
+    const { score, strong_product } = evaluateSignals(payload);
+    const isPdp = score >= 7 && !!strong_product;
+    if (score <= 0 || !strong_product) return await buildPlan(payload, false, score, ctx);
+    return await buildPlan(payload, isPdp, score, ctx);
 }
 
 self.heuristicsStrategy = heuristicsStrategy;

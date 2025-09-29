@@ -9,6 +9,7 @@ function evaluatePdpSignals(payload) {
   const DEBUG = true;
   const dbg = (...args) => { if (DEBUG) { try { console.debug("[PDP][signals]", ...args); } catch {} } };
   let score = 0;
+  let strongProduct = false;
   try {
     const html = String(payload?.html_excerpt || "").slice(0, 200000);
     const title = String(payload?.title || "");
@@ -19,15 +20,16 @@ function evaluatePdpSignals(payload) {
       const u = new URL(url);
       const path = String(u.pathname || "");
       if (path === "/" || path === "") { dbg("anti: root path", { url }); return { score: -10 }; }
+      if (/^\/ref=/.test(path)) { dbg("anti: ref path", { path }); return { score: -8 }; }
     } catch {}
 
     // Quick anti routes
     if (/\b(cart|checkout|basket|account|orders?|login|register|help|support|search)\b/i.test(url)) { dbg("anti: route", { url }); return { score: -10 }; }
 
     // Structured/meta signals (regex over reduced HTML)
-    if (/"@type"\s*:\s*"Product"/i.test(html)) { score += 3; dbg("signal: jsonld product"); }
-    if (/itemtype\s*=\s*"[^"]*schema\.org\/Product/i.test(html)) { score += 2; dbg("signal: microdata product"); }
-    if (/property="og:type"[^>]*content="product"/i.test(html)) { score += 2; dbg("signal: og:type product"); }
+    if (/"@type"\s*:\s*"Product"/i.test(html)) { score += 3; strongProduct = true; dbg("signal: jsonld product"); }
+    if (/itemtype\s*=\s*"[^"]*schema\.org\/Product/i.test(html)) { score += 2; strongProduct = true; dbg("signal: microdata product"); }
+    if (/property="og:type"[^>]*content="product"/i.test(html)) { score += 2; strongProduct = true; dbg("signal: og:type product"); }
     if (/property="product:price:amount"/i.test(html)) { score += 2; dbg("signal: product:price:amount"); }
 
     // CTA (EN + ES variants)
@@ -54,8 +56,8 @@ function evaluatePdpSignals(payload) {
     const hasPrice = /(?:[$€£]\s?\d[\d.,]*)|(?:\d[\d.,]*\s?(?:USD|EUR|GBP))/i.test(html);
     if (hasHeadline && hasPrice) { score += 2; dbg("signal: headline+price"); }
   } catch {}
-  dbg("final score", { score, url: String(payload?.url || "") });
-  return { score };
+  dbg("final score", { score, strong_product: strongProduct, url: String(payload?.url || "") });
+  return { score, strong_product: strongProduct };
 }
 
 /** Generate a short, prefixed trace id safe for logs and headers. */
