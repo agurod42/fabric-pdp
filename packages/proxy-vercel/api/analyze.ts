@@ -245,11 +245,13 @@ export default async function handler(req) {
         agg.anti_pdp_signals = Array.from(new Set(agg.anti_pdp_signals)).slice(0, 24);
         for (const k of ["title","description","shipping","returns"]) (agg.candidates as any)[k] = (agg.candidates as any)[k].slice(0, 8);
       } catch (chunkErr) {
-        console.warn("[PDP][api] chunking failed, falling back", { traceId, error: String((chunkErr as any)?.message || chunkErr) });
+        console.error("[PDP][api] chunking failed", { traceId, error: String((chunkErr as any)?.message || chunkErr) });
+        throw chunkErr;
       }
 
-      // 2) Final pass: either with aggregated summary or fallback to single-shot html
-      const finalPayload = agg ? { url: payload.url, title: payload.title, meta: payload.meta, language: payload.language, trace_id: traceId, aggregated: agg, html_excerpt: "" } : payload;
+      // 2) Final pass: require aggregated summary (no fallback to single-shot html)
+      if (!agg) throw new Error("Aggregation failed: no aggregated summary available");
+      const finalPayload = { url: payload.url, title: payload.title, meta: payload.meta, language: payload.language, trace_id: traceId, aggregated: agg, html_excerpt: "" };
       const messages = [ { role: "system", content: SYS_PROMPT }, { role: "user", content: JSON.stringify(finalPayload) } ];
       try {
         const sys = typeof messages[0]?.content === "string" ? messages[0].content : "";
@@ -298,13 +300,6 @@ export default async function handler(req) {
               let resolved = get(valueRef);
               if (typeof resolved === "string") {
                 out.value = resolved;
-                normalized.push(out);
-                continue;
-              }
-              // Compatibility: if ref like fields.key.proposed, allow fallback to top-level key
-              const m = /^fields\.(title|description|shipping|returns)\.proposed$/.exec(valueRef);
-              if (m && typeof (obj as any)?.[m[1]] === "string") {
-                out.value = (obj as any)[m[1]];
                 normalized.push(out);
                 continue;
               }
