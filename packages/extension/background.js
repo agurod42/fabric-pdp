@@ -132,6 +132,14 @@ api.runtime.onInstalled.addListener(() => {
       api.storage.local.set({ strategySettings: defaults });
     }
   });
+  // Initialize PDP settings on first install
+  api.storage.local.get(["pdpSettings"]).then(cfg => {
+    const p = cfg?.pdpSettings;
+    if (!p || typeof p !== 'object' || typeof p.minScoreToContinue !== 'number') {
+      const defaults = { minScoreToContinue: 10 };
+      api.storage.local.set({ pdpSettings: defaults });
+    }
+  });
   api.action.setBadgeBackgroundColor({ color: "#00A86B" });
 });
 

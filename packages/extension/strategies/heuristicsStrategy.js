@@ -219,8 +219,15 @@ async function buildPlan(payload, isPdp, score, ctx){
 /** Main entry for background: fast PDP detection with optional LLM fallback upstream */
 async function heuristicsStrategy(payload, ctx){
     const { score, strong_product } = evaluateSignals(payload);
-    const isPdp = score >= 7 && !!strong_product;
-    if (score <= 0 || !strong_product) return await buildPlan(payload, false, score, ctx);
+    let threshold = 10;
+    try {
+        const cfg = await api.storage.local.get(["pdpSettings"]);
+        const p = cfg?.pdpSettings;
+        if (p && typeof p.minScoreToContinue === 'number') threshold = p.minScoreToContinue;
+    } catch {}
+    const gate = (typeof score === 'number' && score > threshold) || !!strong_product;
+    const isPdp = gate && score >= 7 && !!strong_product;
+    if (!gate) return await buildPlan(payload, false, score, ctx);
     return await buildPlan(payload, isPdp, score, ctx);
 }
 

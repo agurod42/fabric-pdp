@@ -21,6 +21,14 @@
   <body>
     <h2>PDP Rewriter — Settings</h2>
     <p class="tip">Choose a strategy and optionally whitelist hostnames. Leave whitelist empty to allow <strong>all sites</strong>. Wildcards supported, e.g. <code>*.shopify.com</code>, <code>amazon.com</code>.</p>
+    <h3>Detection</h3>
+    <div class="row">
+      <label for="minScore" style="display:flex;align-items:center;gap:8px">
+        <span>Minimum score to continue</span>
+        <input id="minScore" type="number" min="0" max="100" step="1" style="width:120px"/>
+      </label>
+      <button id="saveDetection">Save</button>
+    </div>
     <h3>Global strategy</h3>
     <div class="row">
       <select id="globalStrategy" style="flex:1">

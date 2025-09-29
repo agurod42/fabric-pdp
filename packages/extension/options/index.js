@@ -33,11 +33,14 @@ function showToast(message){
 /** Load settings from storage and render UI. */
 async function load(){
   log("load settings");
-  const cfg = await api.storage.local.get(["whitelist","strategySettings"]);
+  const cfg = await api.storage.local.get(["whitelist","strategySettings","pdpSettings"]);
   const wl = cfg?.whitelist || [];
   const s = cfg?.strategySettings || { global: "llmStrategy", perDomain: [] };
+  const p = cfg?.pdpSettings || { minScoreToContinue: 10 };
   renderWhitelist(wl);
   renderStrategies(s);
+  const minScore = document.getElementById("minScore");
+  if (minScore) minScore.value = String(typeof p.minScoreToContinue === 'number' ? p.minScoreToContinue : 10);
 }
 
 /** Render the whitelist list with remove buttons. */
@@ -144,3 +147,14 @@ document.getElementById("clearOverrides").addEventListener("click", async ()=>{
 
 log("options loaded");
 load();
+
+// Save detection threshold
+document.getElementById("saveDetection").addEventListener("click", async ()=>{
+  const input = document.getElementById("minScore");
+  const raw = input ? parseInt(input.value, 10) : 10;
+  const minScoreToContinue = Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : 10;
+  const cfg = await api.storage.local.get(["pdpSettings"]);
+  const cur = cfg?.pdpSettings || {};
+  await api.storage.local.set({ pdpSettings: { ...cur, minScoreToContinue } });
+  showToast("Detection threshold saved");
+});

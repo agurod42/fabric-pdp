@@ -66,9 +66,17 @@ async function llmStrategy(payload /*, ctx */) {
   // Pre-check PDP likelihood using shared evaluator; skip LLM if unlikely
   try {
     if (typeof self.evaluatePdpSignals === 'function') {
-      const { score } = self.evaluatePdpSignals(payload) || { score: 0 };
-      try { console.debug('[PDP][llm] evaluatePdpSignals score', score, { url: payload?.url }); } catch {}
-      if (typeof score === 'number' && score <= 0) {
+      const { score, strong_product } = self.evaluatePdpSignals(payload) || { score: 0, strong_product: false };
+      let threshold = 10;
+      try {
+        const api = (typeof browser !== 'undefined') ? browser : chrome;
+        const cfg = await api.storage.local.get(["pdpSettings"]);
+        const p = cfg?.pdpSettings;
+        if (p && typeof p.minScoreToContinue === 'number') threshold = p.minScoreToContinue;
+      } catch {}
+      try { console.debug('[PDP][llm] evaluatePdpSignals score', score, { url: payload?.url, strong_product }); } catch {}
+      const gate = (typeof score === 'number' && score > threshold) || !!strong_product;
+      if (!gate) {
         return {
           is_pdp: false,
           confidence: 0,
@@ -78,7 +86,7 @@ async function llmStrategy(payload /*, ctx */) {
           fields: { title: { selector: '', selector_note: '', extracted: '', proposed: '' }, description: { selector: '', selector_note: '', extracted: '', proposed: '' }, shipping: { selector: '', selector_note: '', extracted: '', proposed: '' }, returns: { selector: '', selector_note: '', extracted: '', proposed: '' } },
           patch: [],
           diagnostics: { pdp_signals: [], anti_pdp_signals: [], duplicates_covered: [] },
-          warnings: ["Skipped LLM: page unlikely to be PDP based on pre-check"]
+          warnings: ["Skipped LLM: below threshold and not strong product"]
         };
       }
     }
