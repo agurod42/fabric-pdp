@@ -10,9 +10,10 @@
   // Ensure WebLLM is available in the page by injecting from CDN if missing
   async function ensureWebLLM(tabId){
     try {
-      // First, quick check in the isolated world
+      // First, quick check in the MAIN world (page context)
       const probe = await api.scripting.executeScript({
         target: { tabId },
+        world: 'MAIN',
         func: () => Boolean(window.WebLLM || window.webllm)
       });
       const present = Array.isArray(probe) ? !!probe[0]?.result : false;
@@ -26,26 +27,38 @@
           try {
             if (window.WebLLM || window.webllm) return 'present';
             const mod = await import('https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm');
+            // Some CDNs expose API on default; unwrap to get the actual API surface
+            const api = (mod && (mod.default || mod));
             // Expose to page globals for later detection
-            window.webllm = mod;
-            return (mod && typeof mod.createChat === 'function') ? 'loaded' : 'loaded_no_createChat';
+            console.log('!@#!@#!@#!@# WebLLM module loaded', { keys: Object.keys(api || {}), rawKeys: Object.keys(mod || {}) });
+            window.webllm = api;
+            const hasLegacyCreate = !!(api && (api.createChat || (api.ChatModule && api.ChatModule.createChat)));
+            const hasEngine = !!(api && typeof api.CreateMLCEngine === 'function');
+            return (hasLegacyCreate || hasEngine) ? 'loaded' : 'loaded_no_factory';
           } catch (e) {
+            console.log('!@#!@#!@#!@# WebLLM module load error', e);
             return `error:${String(e && e.message || e)}`;
           }
         }
       });
+      console.log('!@#!@#!@#!@# WebLLM module load results', results);
       const status = Array.isArray(results) ? String(results[0]?.result || '') : '';
       if (status.startsWith('error:')) { log('ensureWebLLM load error', status); return false; }
 
-      // Verify availability again (either name)
+      // Verify availability again (either name) in MAIN world
       const verify = await api.scripting.executeScript({
         target: { tabId },
+        world: 'MAIN',
         func: () => {
           const g = (window.WebLLM || window.webllm);
-          const hasCreate = !!(g && (g.createChat || (g.ChatModule && g.ChatModule.createChat)));
-          return { hasGlobal: !!g, hasCreate };
+          const hasLegacyCreate = !!(g && (g.createChat || (g.ChatModule && g.ChatModule.createChat)));
+          const hasEngine = !!(g && typeof g.CreateMLCEngine === 'function');
+          const hasOpenAICompat = !!(g && g?.initProgressCallback /* heuristic key present in examples */);
+          const hasCreate = hasLegacyCreate || hasEngine;
+          return { hasGlobal: !!g, hasCreate, hasLegacyCreate, hasEngine, hasOpenAICompat };
         }
       });
+      console.log('!@#!@#!@#!@# WebLLM module verify', verify);
       const v = Array.isArray(verify) ? (verify[0]?.result || {}) : {};
       return !!v.hasGlobal && !!v.hasCreate;
     } catch (e) {
@@ -109,15 +122,152 @@ Choose the MOST SPECIFIC and STABLE selector that uniquely matches EXACTLY ONE e
   "warnings": string[] }\n# VALIDATION\n- JSON must be valid and match the schema exactly. No comments.`;
   }
 
-  // Ask the content script (where webllm is preloaded) to run the analysis
+  // Run the analysis directly in the page's MAIN world so it can access window.webllm
   async function runWebLLMInPage(tabId, payload){
     try {
-      log("send RUN_WEBLLM_ANALYZE", { tabId, url: payload?.url, len: typeof payload?.html_excerpt === 'string' ? payload.html_excerpt.length : 0 });
-      const resp = await api.tabs.sendMessage(tabId, { type: 'RUN_WEBLLM_ANALYZE', payload });
-      log("recv RUN_WEBLLM_ANALYZE", { ok: !!resp?.ok, has_obj: !!resp?.obj, err: resp?.error ? String(resp.error).slice(0, 160) : null });
-      if (resp && resp.ok && resp.obj) return resp.obj;
-      if (resp && !resp.ok) return { __webllm_error: resp.error || 'WebLLM content error' };
-      return { __webllm_error: 'No response from content script' };
+      // Keep full HTML; we'll process in chunks in the page MAIN world
+      const html = typeof payload?.html_excerpt === 'string' ? payload.html_excerpt : '';
+      const reduced = {
+        url: payload?.url || '',
+        title: payload?.title || '',
+        meta: payload?.meta || {},
+        language: payload?.language || 'en',
+        html_excerpt: html,
+      };
+      log("send RUN_WEBLLM_ANALYZE", { tabId, url: reduced.url, html_len: reduced.html_excerpt.length });
+      const systemPrompt = buildSystemPrompt();
+      const results = await api.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        func: async (payload, systemPrompt) => {
+          try {
+            const g = (window.WebLLM || window.webllm);
+            if (!g) return { ok: false, error: 'WebLLM not loaded' };
+            // Single fast model similar in spirit to 4o-mini
+            const MODEL = 'Llama-3.2-1B-Instruct-q4f32_1-MLC';
+            // Helper: get text from reply which can be string or array parts
+            const getText = (reply) => (typeof reply?.content === 'string'
+              ? reply.content
+              : (Array.isArray(reply?.content) ? reply.content.map(p => p.text || '').join('') : '')).trim();
+
+            // Helper: run a single prompt and get text using either legacy or engine API
+            async function runMessages(messages){
+              const legacyCreate = (g.createChat ? g.createChat : (g.ChatModule && g.ChatModule.createChat ? g.ChatModule.createChat : null));
+              if (legacyCreate) {
+                const chat = await legacyCreate({ model: MODEL });
+                await chat.reset();
+                for (const m of messages) { await chat.addMessage(m); }
+                const reply = await chat.generate();
+                return getText(reply);
+              }
+              if (typeof g.CreateMLCEngine === 'function') {
+                const engine = await g.CreateMLCEngine(MODEL, {});
+                if (engine && engine.chat && engine.chat.completions && typeof engine.chat.completions.create === 'function') {
+                  const comp = await engine.chat.completions.create({ messages, stream: false });
+                  return String(comp?.choices?.[0]?.message?.content || '').trim();
+                }
+                if (engine && typeof engine.generate === 'function') {
+                  const merged = messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
+                  const txt = await engine.generate(merged);
+                  return String(txt || '').trim();
+                }
+              }
+              throw new Error('No WebLLM chat factory found');
+            }
+
+            // Split HTML into manageable chunks
+            const html = String(payload?.html_excerpt || '');
+            const CHUNK_SIZE = 8000; // chars
+            const chunks = [];
+            for (let i = 0; i < html.length; i += CHUNK_SIZE) {
+              chunks.push(html.slice(i, i + CHUNK_SIZE));
+            }
+
+            // Per-chunk extraction prompt that yields compact JSON
+            const CHUNK_SYS = 'You analyze a fragment of sanitized HTML from a product page. Output STRICT JSON with keys: { "pdp_signals": string[], "anti_pdp_signals": string[], "candidates": { "title": Array<{selector:string, text:string}>, "description": Array<{selector:string, html:string}>, "shipping": Array<{selector:string, html:string}>, "returns": Array<{selector:string, html:string}> } }. Choose precise selectors that uniquely match within the provided fragment only. If none, use empty arrays. No comments.';
+
+            function buildChunkUser(i, total, htmlFrag){
+              return `Chunk ${i+1}/${total} HTML:\n` + htmlFrag;
+            }
+
+            // Concurrency-limited parallel processing of chunks
+            async function mapWithConcurrency(items, limit, fn){
+              const out = new Array(items.length);
+              let idx = 0;
+              async function worker(){
+                while (true){
+                  const i = idx; idx++; if (i >= items.length) return;
+                  out[i] = await fn(items[i], i);
+                }
+              }
+              const n = Math.max(1, Math.min(limit, items.length));
+              await Promise.all(Array.from({ length: n }, () => worker()));
+              return out;
+            }
+
+            const summaries = await mapWithConcurrency(chunks, 3, async (frag, i) => {
+              const txt = await runMessages([
+                { role: 'system', content: CHUNK_SYS },
+                { role: 'user', content: buildChunkUser(i, chunks.length, frag) }
+              ]);
+              const start = txt.indexOf('{');
+              const end = txt.lastIndexOf('}');
+              const raw = txt.slice(start, end + 1) || '{}';
+              try { return JSON.parse(raw); } catch { return {}; }
+            });
+
+            // Merge summaries into aggregate candidates and signals
+            const agg = {
+              pdp_signals: [],
+              anti_pdp_signals: [],
+              candidates: { title: [], description: [], shipping: [], returns: [] }
+            };
+            for (const s of summaries) {
+              if (Array.isArray(s?.pdp_signals)) agg.pdp_signals.push(...s.pdp_signals);
+              if (Array.isArray(s?.anti_pdp_signals)) agg.anti_pdp_signals.push(...s.anti_pdp_signals);
+              const c = s?.candidates || {};
+              for (const k of ['title','description','shipping','returns']) {
+                if (Array.isArray(c[k])) agg.candidates[k].push(...c[k]);
+              }
+            }
+            // Deduplicate signals
+            agg.pdp_signals = Array.from(new Set(agg.pdp_signals)).slice(0, 24);
+            agg.anti_pdp_signals = Array.from(new Set(agg.anti_pdp_signals)).slice(0, 24);
+            // Limit candidates per field to top N to keep prompt small
+            for (const k of ['title','description','shipping','returns']) {
+              agg.candidates[k] = (Array.isArray(agg.candidates[k]) ? agg.candidates[k] : []).slice(0, 6);
+            }
+
+            // Final prompt: supply page context + aggregated candidates, ask for strict PDP schema JSON
+            const FINAL_SYS = systemPrompt;
+            const finalUser = JSON.stringify({
+              url: payload?.url || '',
+              title: payload?.title || '',
+              meta: payload?.meta || {},
+              language: payload?.language || 'en',
+              aggregated: agg
+            });
+            const finalTxt = await runMessages([
+              { role: 'system', content: FINAL_SYS },
+              { role: 'user', content: finalUser }
+            ]);
+            const fStart = finalTxt.indexOf('{');
+            const fEnd = finalTxt.lastIndexOf('}');
+            const fRaw = finalTxt.slice(fStart, fEnd + 1) || '{}';
+            let obj = {};
+            try { obj = JSON.parse(fRaw); } catch {}
+            return { ok: true, obj };
+          } catch (e) {
+            return { ok: false, error: String(e?.message || e) };
+          }
+        },
+        args: [reduced, systemPrompt]
+      });
+      const res = Array.isArray(results) ? (results[0]?.result ?? null) : null;
+      log("recv RUN_WEBLLM_ANALYZE", { ok: !!res?.ok, has_obj: !!res?.obj, err: res?.error ? String(res.error).slice(0, 160) : null });
+      if (res && res.ok && res.obj) return res.obj;
+      if (res && !res.ok) return { __webllm_error: res.error || 'WebLLM page error' };
+      return { __webllm_error: 'No response from page MAIN world' };
     } catch (e) {
       log("RUN_WEBLLM_ANALYZE error", String(e?.message || e));
       return { __webllm_error: String(e?.message || e) };
@@ -147,7 +297,15 @@ Choose the MOST SPECIFIC and STABLE selector that uniquely matches EXACTLY ONE e
       return obj;
     } catch (e) {
       log("fallback to backend", String(e?.message || e));
-      if (typeof self.callLLM === 'function') return await self.callLLM(payload);
+      if (typeof self.callLLM === 'function') {
+        const plan = await self.callLLM(payload);
+        try {
+          plan.meta = plan.meta && typeof plan.meta === 'object' ? { ...plan.meta } : {};
+          plan.meta.strategy_fallback = true;
+          plan.meta.strategy_fallback_reason = String(e?.message || e);
+        } catch {}
+        return plan;
+      }
       // If backend helper is not exposed, just bubble the error
       throw e;
     }

@@ -26,7 +26,7 @@ export function safeString(input: any): string { return typeof input === "string
 
 export function buildOpenAIEnv() {
   const base = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-  const model = process.env.OPENAI_MODEL || "gpt-4.1";
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
   const apiKey = process.env.OPENAI_API_KEY || "";
   return { base, model, apiKey };
 }

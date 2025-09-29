@@ -91,9 +91,12 @@ async function init(){
   const resultEmoji = plan.is_pdp ? '✅' : 'ℹ️';
   const tookMs = (plan?.meta && typeof plan.meta.process_ms === 'number') ? plan.meta.process_ms : null;
   const tookStr = (tookMs != null) ? ` · ${(tookMs/1000).toFixed(2)}s` : '';
-  const strategyStr = (plan?.meta && typeof plan.meta.strategy_id === 'string' && plan.meta.strategy_id)
-    ? `<div class="status"><strong>Strategy:</strong> <code>${enc(plan.meta.strategy_id)}</code></div>`
-    : '';
+  const strategyIdVal = (plan?.meta && typeof plan.meta.strategy_id === 'string' && plan.meta.strategy_id) ? plan.meta.strategy_id : '';
+  const fallback = !!(plan?.meta && plan.meta.strategy_fallback);
+  const fallbackReason = (plan?.meta && typeof plan.meta.strategy_fallback_reason === 'string') ? plan.meta.strategy_fallback_reason : '';
+  const strategyStr = strategyIdVal
+    ? `<div class="status"><strong>Strategy:</strong> <code>${enc(strategyIdVal)}</code>${fallback ? ` <span title=\"${enc(fallbackReason)}\" style=\"color:#B45309\">(fallback)</span>` : ''}</div>`
+    : (fallback ? `<div class="status"><strong>Strategy:</strong> <span style=\"color:#B45309\">fallback</span></div>` : '');
   // Build list of additional applied changes beyond the primary field selectors
   let extraAppliedHtml = '';
   try {

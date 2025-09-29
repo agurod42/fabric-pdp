@@ -151,23 +151,6 @@ export default async function handler(req) {
         - If \`is_pdp\` = false: leave all \`proposed\` as "" and \`patch\` empty; populate \`warnings\` with reasons.
       `;
 
-      const messages = [
-        { role: "system", content: SYS_PROMPT },
-        { role: "user", content: JSON.stringify(payload) }
-      ];
-
-      try {
-        const sys = typeof messages[0]?.content === "string" ? messages[0].content : "";
-        const usr = typeof messages[1]?.content === "string" ? messages[1].content : "";
-        console.debug("[PDP][api] llm prompt", {
-          traceId,
-          sys_len: sys.length,
-          usr_len: usr.length,
-          sys,
-          usr,
-        });
-      } catch {}
-
       const { base: OPENAI_BASE, model: OPENAI_MODEL, apiKey: OPENAI_API_KEY } = buildOpenAIEnv();
 
       try {
@@ -176,7 +159,6 @@ export default async function handler(req) {
           base: OPENAI_BASE,
           model: OPENAI_MODEL,
           api_key_present: !!OPENAI_API_KEY,
-          msg_lens: messages.map(m => (typeof m?.content === "string" ? m.content.length : 0)),
         });
       } catch {}
 
@@ -186,51 +168,93 @@ export default async function handler(req) {
         return;
       }
 
-      const tFetchStart = Date.now();
-      const headersInit: Record<string, string> = buildOpenAIHeaders(OPENAI_API_KEY, traceId);
-      const resp = await fetch(`${OPENAI_BASE}/chat/completions`, {
-        method: "POST",
-        headers: headersInit,
-        body: JSON.stringify({
-          model: OPENAI_MODEL,
-          messages,
-          temperature: 0,
-          stream: false,
-          response_format: { type: "json_object" },
-        })
-      });
-      try {
-        console.debug("[PDP][api] llm fetch", {
-          traceId,
-          status: resp.status,
-          ok: resp.ok,
-          took_ms: Date.now() - tFetchStart,
-          content_length: resp.headers.get("content-length") || null,
-        });
-      } catch {}
-      if (!resp.ok) {
-        let errTxt = "";
-        try { errTxt = await resp.text(); } catch {}
-        throw new Error(`OpenAI error ${resp.status}: ${errTxt || resp.statusText || "no body"}`);
+      // Helper: call OpenAI Chat Completions
+      async function chat(messages: Array<{ role: string; content: string }>, responseFormatJson = true): Promise<string> {
+        const headersInit: Record<string, string> = buildOpenAIHeaders(OPENAI_API_KEY as string, traceId);
+        const body: any = { model: OPENAI_MODEL, messages, temperature: 0, stream: false };
+        if (responseFormatJson) body.response_format = { type: "json_object" } as any;
+        const t0f = Date.now();
+        const resp = await fetch(`${OPENAI_BASE}/chat/completions`, { method: "POST", headers: headersInit, body: JSON.stringify(body) });
+        try {
+          console.debug("[PDP][api] llm fetch", { traceId, status: resp.status, ok: resp.ok, took_ms: Date.now() - t0f });
+        } catch {}
+        if (!resp.ok) {
+          let errTxt = ""; try { errTxt = await resp.text(); } catch {}
+          throw new Error(`OpenAI error ${resp.status}: ${errTxt || resp.statusText || "no body"}`);
+        }
+        const json = await resp.json();
+        return (json?.choices?.[0]?.message?.content ?? "").trim();
       }
-      const openai = await resp.json();
-      const txt = (openai?.choices?.[0]?.message?.content ?? "").trim() || "{}";
+
+      // Helper: limited concurrency map
+      async function mapWithConcurrency<I, O>(items: I[], limit: number, fn: (item: I, index: number) => Promise<O>): Promise<O[]> {
+        const out: O[] = new Array(items.length);
+        let i = 0;
+        const runners: Promise<void>[] = [];
+        async function run() {
+          while (true) {
+            const idx = i; i++; if (idx >= items.length) return;
+            out[idx] = await fn(items[idx], idx);
+          }
+        }
+        const n = Math.max(1, Math.min(limit, items.length));
+        for (let k = 0; k < n; k++) runners.push(run());
+        await Promise.all(runners);
+        return out;
+      }
+
+      // 1) Chunk the HTML and summarize each in parallel
+      const html = String(payload.html_excerpt || "");
+      const CHUNK_SIZE = 8000; // chars
+      const chunks: string[] = [];
+      for (let i = 0; i < html.length; i += CHUNK_SIZE) chunks.push(html.slice(i, i + CHUNK_SIZE));
+
+      const CHUNK_SYS = 'You analyze a fragment of sanitized HTML from a product page. Output STRICT JSON with keys: { "pdp_signals": string[], "anti_pdp_signals": string[], "candidates": { "title": Array<{selector:string, text:string}>, "description": Array<{selector:string, html:string}>, "shipping": Array<{selector:string, html:string}>, "returns": Array<{selector:string, html:string}> } }. Choose precise selectors that uniquely match within the provided fragment only. If none, use empty arrays. No comments.';
+      const buildChunkUser = (i: number, total: number, frag: string) => `Chunk ${i+1}/${total} HTML:\n` + frag;
+
+      let agg: any = null;
       try {
-        console.debug("[PDP][api] llm raw response", {
-          traceId,
-          model: OPENAI_MODEL,
-          message_len: typeof (openai?.choices?.[0]?.message?.content) === "string" ? openai.choices[0].message.content.length : 0,
-          preview: typeof (openai?.choices?.[0]?.message?.content) === "string" ? openai.choices[0].message.content : "",
+        const summariesTxt = await mapWithConcurrency(chunks, 4, async (frag, idx) => {
+          const msgs = [ { role: "system", content: CHUNK_SYS }, { role: "user", content: buildChunkUser(idx, chunks.length, frag) } ];
+          return await chat(msgs, true);
         });
+        const summaries = summariesTxt.map((txt, i) => {
+          const s = txt || '{}';
+          const a = s.indexOf('{'); const b = s.lastIndexOf('}');
+          const raw = s.slice(a, b + 1) || '{}';
+          try { return JSON.parse(raw); } catch { return {}; }
+        });
+        // Merge
+        agg = { pdp_signals: [] as string[], anti_pdp_signals: [] as string[], candidates: { title: [] as any[], description: [] as any[], shipping: [] as any[], returns: [] as any[] } };
+        for (const s of summaries) {
+          if (Array.isArray(s?.pdp_signals)) agg.pdp_signals.push(...s.pdp_signals);
+          if (Array.isArray(s?.anti_pdp_signals)) agg.anti_pdp_signals.push(...s.anti_pdp_signals);
+          const c = s?.candidates || {};
+          for (const k of ["title","description","shipping","returns"]) if (Array.isArray(c[k])) (agg.candidates as any)[k].push(...c[k]);
+        }
+        agg.pdp_signals = Array.from(new Set(agg.pdp_signals)).slice(0, 24);
+        agg.anti_pdp_signals = Array.from(new Set(agg.anti_pdp_signals)).slice(0, 24);
+        for (const k of ["title","description","shipping","returns"]) (agg.candidates as any)[k] = (agg.candidates as any)[k].slice(0, 8);
+      } catch (chunkErr) {
+        console.warn("[PDP][api] chunking failed, falling back", { traceId, error: String((chunkErr as any)?.message || chunkErr) });
+      }
+
+      // 2) Final pass: either with aggregated summary or fallback to single-shot html
+      const finalPayload = agg ? { url: payload.url, title: payload.title, meta: payload.meta, language: payload.language, trace_id: traceId, aggregated: agg, html_excerpt: "" } : payload;
+      const messages = [ { role: "system", content: SYS_PROMPT }, { role: "user", content: JSON.stringify(finalPayload) } ];
+      try {
+        const sys = typeof messages[0]?.content === "string" ? messages[0].content : "";
+        const usr = typeof messages[1]?.content === "string" ? messages[1].content : "";
+        console.debug("[PDP][api] llm final prompt", { traceId, sys_len: sys.length, usr_len: usr.length });
       } catch {}
+
+      const txt = await chat(messages, true);
       const start = txt.indexOf("{");
       const end = txt.lastIndexOf("}");
       const raw = txt.slice(start, end + 1);
       let obj: any;
       try { obj = JSON.parse(raw); } catch (parseErr) {
-        try {
-          console.warn("[PDP][api] llm parse error", { traceId, msg_len: txt.length, raw_len: raw.length, error: String((parseErr as any)?.message || parseErr) });
-        } catch {}
+        try { console.warn("[PDP][api] llm parse error", { traceId, msg_len: txt.length, raw_len: raw.length, error: String((parseErr as any)?.message || parseErr) }); } catch {}
       }
       if (obj && typeof obj === 'object') {
         if (!Array.isArray(obj.warnings)) obj.warnings = [];
