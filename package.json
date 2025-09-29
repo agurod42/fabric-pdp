@@ -7,8 +7,9 @@
     "packages/proxy-vercel"
   ],
   "scripts": {
-    "build": "echo \"Nothing to build\"",
-    "build:extension": "bash -c 'set -euo pipefail; rm -rf dist/extension dist/pdp-rewriter-extension.zip; mkdir -p dist/extension; rsync -a --exclude node_modules/ packages/extension/ dist/extension/; (cd dist/extension && zip -qr ../pdp-rewriter-extension.zip .); echo Built dist/pdp-rewriter-extension.zip'",
+    "build": "npm run build:chrome && npm run build:safari",
+    "build:chrome": "bash -c 'set -euo pipefail; rm -rf dist/chrome; mkdir -p dist/chrome/unpacked; rsync -a --exclude node_modules/ packages/extension/ dist/chrome/unpacked/; (cd dist/chrome/unpacked && zip -qr ../pdp-rewriter-extension.zip .); echo Built dist/chrome/pdp-rewriter-extension.zip'",
+    "build:safari": "bash -c 'set -euo pipefail; xcodebuild -runFirstLaunch >/dev/null 2>&1 || true; rm -rf dist/safari; mkdir -p dist/safari; xcrun safari-web-extension-converter packages/extension --app-name \"PDP Rewriter\" --project-location dist/safari --copy-resources --no-open --force --macos-only; echo Built Safari project at dist/safari/PDP Rewriter'",
     "dev": "npm -w packages/proxy-vercel run dev"
   }
 }

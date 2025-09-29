@@ -12,6 +12,10 @@ MV3 browser extension that detects PDPs (Product Detail Pages), proposes improve
 - `packages/extension/`: MV3 extension (background service worker, content script, page helper, popup, options, strategies)
 - `packages/proxy-vercel/`: Vercel Edge API for `analyze` and `generate`
 
+### Downloads
+- **Chrome (zip)**: [`pdp-rewriter-extension.zip`](https://github.com/agurod42/fabric-pdp/releases/latest/download/pdp-rewriter-extension.zip)
+- **Safari (Xcode project, tgz)**: [`pdp-rewriter-safari-project.tgz`](https://github.com/agurod42/fabric-pdp/releases/latest/download/pdp-rewriter-safari-project.tgz)
+
 ### Architecture
 - **Extension**: Background orchestrates; content script reduces DOM; page helper applies safe `setText`/`setHTML`; popup shows status and diffs; options manages whitelist and strategy overrides.
 - **Edge proxy**: Stateless `/api/analyze` and `/api/generate` endpoints with server‑side API keys.
@@ -104,24 +108,15 @@ npm -w packages/proxy-vercel run dev
 4) Note the deployment URL and update the extension background constants.
 
 ### Package builds
-- **Chrome**:
+- **Build both (Chrome + Safari)**:
 
 ```bash
-cd packages/extension
-zip -r ../pdp-rewriter-chrome.zip . -x "**/node_modules/**" "**/.DS_Store"
+npm run build
 ```
 
-- **Safari**:
-
-```bash
-# Requires Xcode 13+ on macOS
-xcrun safari-web-extension-converter "$(pwd)/packages/extension" \
-  --app-name "PDP Rewriter" \
-  --project-location "$(pwd)/build-safari" \
-  --copy-resources --no-open --force --macos-only
-```
-
-Produces an Xcode project under `build-safari/` you can open and sign.
+Artifacts are output to:
+- `dist/chrome/pdp-rewriter-extension.zip` (unpacked at `dist/chrome/unpacked/`)
+- `dist/safari/PDP Rewriter/` (Xcode project) and `dist/safari/pdp-rewriter-safari-project.tgz`
 
 ### Safety & limitations
 - DOM patching is restricted and sanitized; selectors targeting `meta`, `script`, and `link` tags are excluded.
