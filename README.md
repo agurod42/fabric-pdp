@@ -99,7 +99,7 @@ Patch operations are restricted to `setText` and `setHTML`, with a selector deny
 - **Proxy env (Vercel)**:
   - `OPENAI_API_KEY` (required)
   - `OPENAI_BASE_URL` (optional; default OpenAI API)
-  - `OPENAI_MODEL` (default: `gpt-4.1`)
+  - `OPENAI_MODEL` (default: `o4-mini`)
 
 - **Point extension to your proxy**: Update `PROXY_URL` and `PROXY_GENERATE_URL` in `packages/extension/background.js`.
 
