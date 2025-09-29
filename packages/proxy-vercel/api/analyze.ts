@@ -12,7 +12,7 @@ export default async function handler(req) {
   });
   const traceId = (typeof trace_id === "string" && trace_id) ? trace_id : "";
 
-  
+  console.debug("[PDP][api] request start", { method: req.method, traceId });
 
   // Prepare streaming response to send an early byte and avoid initial-response timeout
   const { readable, writer, encoder, headers } = createStream();
@@ -33,6 +33,17 @@ export default async function handler(req) {
         html_excerpt: safe(html_excerpt),
         trace_id: traceId,
       };
+
+      try {
+        console.debug("[PDP][api] payload summary", {
+          traceId,
+          url: payload.url || "",
+          title_len: payload.title.length,
+          language: payload.language || "",
+          html_len: payload.html_excerpt.length,
+          meta_keys: Object.keys(payload.meta || {}).slice(0, 10),
+        });
+      } catch {}
 
       const SYS_PROMPT = `
         You are a meticulous PDP (Product Detail Page) extractor and rewriter. You MUST output STRICT JSON matching the exact schema below—no extra keys, no comments.
@@ -154,6 +165,9 @@ export default async function handler(req) {
       `;
 
       const { base: OPENAI_BASE, model: OPENAI_MODEL, apiKey: OPENAI_API_KEY } = buildOpenAIEnv();
+      try {
+        console.debug("[PDP][api] OpenAI env", { traceId, base: OPENAI_BASE, model: OPENAI_MODEL });
+      } catch {}
 
       
 
@@ -176,6 +190,15 @@ export default async function handler(req) {
           throw new Error(`OpenAI error ${resp.status}: ${errTxt || resp.statusText || "no body"}`);
         }
         const json = await resp.json();
+        try {
+          console.debug("[PDP][api] OpenAI chat ok", {
+            traceId,
+            model: OPENAI_MODEL,
+            duration_ms: Date.now() - t0f,
+            messages_len: messages.length,
+            response_len: (json?.choices?.[0]?.message?.content ?? "").length,
+          });
+        } catch {}
         return (json?.choices?.[0]?.message?.content ?? "").trim();
       }
 
@@ -196,20 +219,51 @@ export default async function handler(req) {
         return out;
       }
 
-      // 1) Chunk the HTML and summarize each in parallel
+      // 1) Chunk the HTML and summarize each in parallel (10-way split)
       const html = String(payload.html_excerpt || "");
-      const CHUNK_SIZE = 8000; // chars
+      const NUM_PROCESSES = 10;
       const chunks: string[] = [];
-      for (let i = 0; i < html.length; i += CHUNK_SIZE) chunks.push(html.slice(i, i + CHUNK_SIZE));
+      if (html.length > 0) {
+        const chunkSize = Math.ceil(html.length / NUM_PROCESSES);
+        for (let i = 0; i < NUM_PROCESSES; i++) {
+          const startIdx = i * chunkSize;
+          if (startIdx >= html.length) break;
+          const endIdx = Math.min(startIdx + chunkSize, html.length);
+          chunks.push(html.slice(startIdx, endIdx));
+        }
+        try {
+          console.debug("[PDP][api] chunk plan", {
+            traceId,
+            total_len: html.length,
+            processes: NUM_PROCESSES,
+            chunk_count: chunks.length,
+            approx_chunk_size: Math.ceil(html.length / Math.max(1, chunks.length)),
+          });
+        } catch {}
+      } else {
+        try { console.debug("[PDP][api] empty html, nothing to chunk", { traceId }); } catch {}
+      }
 
       const CHUNK_SYS = 'You analyze a fragment of sanitized HTML from a product page. Output STRICT JSON with keys: { "pdp_signals": string[], "anti_pdp_signals": string[], "candidates": { "title": Array<{selector:string, text:string}>, "description": Array<{selector:string, html:string}>, "shipping": Array<{selector:string, html:string}>, "returns": Array<{selector:string, html:string}> } }. For shipping/returns candidates, include only CONTENT containers (policy text, bullet lists, or tables) and avoid headings/labels/triggers; if a trigger controls a panel, select the panel content. Choose precise selectors that uniquely match within the provided fragment only. If none, use empty arrays. No comments.';
       const buildChunkUser = (i: number, total: number, frag: string) => `Chunk ${i+1}/${total} HTML:\n` + frag;
 
       let agg: any = null;
       try {
-        const summariesTxt = await mapWithConcurrency(chunks, 4, async (frag, idx) => {
+        const summariesTxt = await mapWithConcurrency(chunks, NUM_PROCESSES, async (frag, idx) => {
           const msgs = [ { role: "system", content: CHUNK_SYS }, { role: "user", content: buildChunkUser(idx, chunks.length, frag) } ];
-          return await chat(msgs, true);
+          const tChunk = Date.now();
+          const out = await chat(msgs, true);
+          try {
+            console.debug("[PDP][api] chunk analyzed", {
+              traceId,
+              idx,
+              chunks_total: chunks.length,
+              frag_len: frag.length,
+              duration_ms: Date.now() - tChunk,
+              out_len: (out || "").length,
+            });
+          } catch {}
+          return out;
         });
         const summaries = summariesTxt.map((txt, i) => {
           const s = txt || '{}';
@@ -228,6 +282,19 @@ export default async function handler(req) {
         agg.pdp_signals = Array.from(new Set(agg.pdp_signals)).slice(0, 24);
         agg.anti_pdp_signals = Array.from(new Set(agg.anti_pdp_signals)).slice(0, 24);
         for (const k of ["title","description","shipping","returns"]) (agg.candidates as any)[k] = (agg.candidates as any)[k].slice(0, 8);
+        try {
+          console.debug("[PDP][api] aggregation complete", {
+            traceId,
+            pdp_signals_count: agg.pdp_signals.length,
+            anti_pdp_signals_count: agg.anti_pdp_signals.length,
+            candidates_counts: {
+              title: (agg.candidates?.title || []).length,
+              description: (agg.candidates?.description || []).length,
+              shipping: (agg.candidates?.shipping || []).length,
+              returns: (agg.candidates?.returns || []).length,
+            }
+          });
+        } catch {}
       } catch (chunkErr) {
         console.error("[PDP][api] chunking failed", { traceId, error: String((chunkErr as any)?.message || chunkErr) });
         throw chunkErr;
@@ -239,7 +306,15 @@ export default async function handler(req) {
       const messages = [ { role: "system", content: SYS_PROMPT }, { role: "user", content: JSON.stringify(finalPayload) } ];
       
 
+      const tFinal = Date.now();
       const txt = await chat(messages, true);
+      try {
+        console.debug("[PDP][api] final pass complete", {
+          traceId,
+          duration_ms: Date.now() - tFinal,
+          out_len: txt.length,
+        });
+      } catch {}
       const start = txt.indexOf("{");
       const end = txt.lastIndexOf("}");
       const raw = txt.slice(start, end + 1);
@@ -292,6 +367,9 @@ export default async function handler(req) {
           return normalized;
         };
         obj.patch = normalizePatch(obj.patch);
+        try {
+          console.debug("[PDP][api] patch normalized", { traceId, patch_steps: Array.isArray(obj.patch) ? obj.patch.length : 0 });
+        } catch {}
         const enriched = JSON.stringify(obj);
         
         await writer.write(encoder.encode(enriched));
