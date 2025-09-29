@@ -42,10 +42,12 @@ sequenceDiagram
 ```
 
 #### Key decisions
-- **Deterministic inputs**: DOM is reduced to a compact, stable excerpt to lower cost and variability.
-- **Edge simplicity**: Vercel Edge provides low‑latency, stateless scaling without a persistent backend.
-- **Quality vs locality**: `llmStrategy` tends to be higher quality; `heuristicsStrategy` is instant and offline.
-- **Safety over flexibility**: Only text/HTML updates on safe elements, with sanitization and denylists.
+- **Configurability and data control**: Whitelist and per‑domain overrides minimize unintended runs and data egress, at the cost of a small initial setup.
+- **Deterministic inputs**: The content script builds a compact, sanitized HTML excerpt to reduce cost, noise, and drift between runs.
+- **Edge proxy over dedicated backend**: Stateless Vercel Edge functions keep operational overhead low and latency low; we trade off persistence/observability that a bespoke backend would provide.
+- **MV3 lifecycle constraints**: Service‑worker wake/sleep and message passing drive small caches and simple orchestration, at the expense of lifecycle complexity.
+- **Safety‑first DOM mutations**: Only `setText`/`setHTML` on safe nodes; sanitization and selector denylists (e.g., excluding `meta/script/link`); reversible via revert/re‑apply.
+- **Strategy trade‑off (quality vs latency)**: LLM‑backed plans are richer but slower/costlier; heuristic plans are instant/offline but may be minimal.
 
 ### How it works
 1) `content/content.js` produces a reduced HTML excerpt + metadata and asks background for a plan.
