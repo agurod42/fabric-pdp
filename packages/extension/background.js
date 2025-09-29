@@ -1,13 +1,21 @@
 
-// background.js
+// background.js — Service worker entry for the extension
+// Responsibilities:
+// - Messaging hub between content scripts and UI
+// - Plan resolution via pluggable strategies (JSON-LD, LLM, OCR)
+// - Applying patches in page via scripting
+// - Badge state and lightweight session caching
 const api = (typeof browser !== 'undefined') ? browser : chrome;
 const PROXY_URL = "https://fabric-pdp.vercel.app/api/analyze"; // set your deployed URL
 const PROXY_GENERATE_URL = "https://fabric-pdp.vercel.app/api/generate";
-const PROXY_OCR_URL = "https://fabric-pdp.vercel.app/api/ocr";
+const PROXY_OCR_URL = "https://fabric-pdp.vercel.app/api/locate";
 const DEBUG = true;
 const log = (...args) => { if (DEBUG) console.debug("[PDP][bg]", ...args); };
 
-// Unified badge helper for consistency
+/**
+ * Set extension badge text and background color for a tab.
+ * Uses a small palette to communicate states: PDP, ERR, …, AP.
+ */
 async function setBadge(text, tabId){
   try {
     const color = (text === "PDP") ? "#00A86B"
@@ -22,18 +30,20 @@ async function setBadge(text, tabId){
 
 const sessionCache = new Map();
 const storageArea = (api?.storage && api.storage.session) ? api.storage.session : api.storage.local;
+/** Store a small value in the chosen storage area (session if available). */
 async function cacheSet(key, value) {
   try { await storageArea.set({ [key]: value }); } catch(e) { log("cacheSet error", e?.message || e); }
 }
+/** Retrieve a value previously stored via cacheSet. */
 async function cacheGet(key) {
   try { const obj = await storageArea.get([key]); return obj?.[key]; } catch(e) { log("cacheGet error", e?.message || e); return undefined; }
 }
 
 // Load strategies as separate modules into the service worker global scope
-try { importScripts("strategies/llmStrategy.js"); } catch(e) { log("importScripts llmStrategy error", e); }
-try { importScripts("strategies/jsonLdStrategy.js"); } catch(e) { log("importScripts jsonLdStrategy error", e); }
-try { importScripts("strategies/ocrStrategy.js"); } catch(e) { log("importScripts ocrStrategy error", e); }
 try { importScripts("page/applyPatchInPage.js"); } catch(e) { log("importScripts applyPatchInPage error", e); }
+try { importScripts("strategies/jsonLdStrategy.js"); } catch(e) { log("importScripts jsonLdStrategy error", e); }
+try { importScripts("strategies/llmStrategy.js"); } catch(e) { log("importScripts llmStrategy error", e); }
+try { importScripts("strategies/ocrStrategy.js"); } catch(e) { log("importScripts ocrStrategy error", e); }
 try { importScripts("utils/utils.js"); } catch(e) { log("importScripts utils error", e); }
 
 const STRATEGY_DEFAULT_ID = "jsonLdStrategy";
@@ -187,6 +197,10 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
+/**
+ * Load persisted strategy settings.
+ * Falls back to sane defaults when not configured.
+ */
 async function getStrategySettings(){
   try {
     const cfg = await api.storage.local.get(["strategySettings"]);
@@ -200,6 +214,7 @@ async function getStrategySettings(){
   }
 }
 
+/** Choose a strategy id for a given URL from settings (per-domain > global). */
 function chooseStrategyIdForUrl(urlStr, settings){
   const urlHost = safeHostname(urlStr);
   // Find first matching per-domain pattern
@@ -212,10 +227,15 @@ function chooseStrategyIdForUrl(urlStr, settings){
   return settings.global || STRATEGY_DEFAULT_ID;
 }
 
+/** Best-effort hostname extraction (empty string on failure). */
 function safeHostname(urlStr){
   try { return new URL(urlStr).hostname; } catch { return ""; }
 }
 
+/**
+ * Resolve a plan using the selected strategy.
+ * Also caches the plan and clears any last error for the tab.
+ */
 async function resolvePlanWithStrategy(payload, tabId){
   log("RESOLVE_PLAN start", { url: payload?.url });
   const errKey = (tabId != null) ? `error:${tabId}` : undefined;
@@ -241,6 +261,10 @@ async function resolvePlanWithStrategy(payload, tabId){
 }
 
 
+/**
+ * Ask backend generator for improved field values.
+ * Returns object like { title, description, shipping, returns } or throws on error.
+ */
 async function generateValues(input){
   const traceId = (typeof self.makeTraceId === 'function') ? self.makeTraceId() : makeTraceId();
   const body = JSON.stringify({ ...input, trace_id: traceId });
@@ -262,6 +286,7 @@ async function generateValues(input){
 
 // moved to utils/utils.js
 
+/** Call the analyze endpoint and validate the returned plan schema. */
 async function callLLM(payload) {
   const t0 = Date.now();
   const traceId = makeTraceId();

@@ -1,18 +1,23 @@
 
+// options/index.js — Settings page logic for strategy and whitelist management
 const api = (typeof browser !== 'undefined') ? browser : chrome;
 const DEBUG = true;
 const log = (...args) => { if (DEBUG) console.debug("[PDP][options]", ...args); };
 
+/** Available strategy choices displayed in selects. */
 const STRATEGIES = [
   { id: "jsonLdStrategy", label: "JSON-LD Strategy" },
   { id: "llmStrategy", label: "LLM Strategy" },
+  { id: "ocrStrategy", label: "OCR Strategy" },
 ];
 
+/** Fill a <select> with strategy options. */
 function fillStrategySelect(selectEl){
   if (!selectEl) return;
   selectEl.innerHTML = STRATEGIES.map(s => `<option value="${s.id}">${s.label}</option>`).join("");
 }
 
+/** Brief toast feedback message. */
 function showToast(message){
   const el = document.getElementById("toast");
   if (!el) return;
@@ -27,6 +32,7 @@ function showToast(message){
   });
 }
 
+/** Load settings from storage and render UI. */
 async function load(){
   log("load settings");
   const cfg = await api.storage.local.get(["whitelist","strategySettings"]);
@@ -36,6 +42,7 @@ async function load(){
   renderStrategies(s);
 }
 
+/** Render the whitelist list with remove buttons. */
 function renderWhitelist(wl){
   const list = document.getElementById("list");
   list.innerHTML = "";
@@ -57,6 +64,7 @@ function renderWhitelist(wl){
   });
 }
 
+/** Render global strategy select and per-domain overrides. */
 function renderStrategies(s){
   fillStrategySelect(document.getElementById("globalStrategy"));
   fillStrategySelect(document.getElementById("domainStrategy"));

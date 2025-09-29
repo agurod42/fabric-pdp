@@ -1,5 +1,11 @@
-// OCR-based strategy: capture full-page screenshot, send to backend for vision LLM, map pixel boxes to selectors
+// strategies/ocrStrategy.js — OCR-based strategy
+// Flow:
+// 1) Capture full-page screenshot via html2canvas
+// 2) Send image and page metrics to backend OCR endpoint
+// 3) Map detection bounding boxes back to DOM selectors
+// 4) Build fields and patch with safe operations
 
+/** Resolve a plan via OCR + detection-to-selector mapping. */
 async function resolveViaOCR(payload, ctx) {
   const planBase = { source: "ocrStrategy", url: payload?.url };
   const tabId = ctx?.tabId;
@@ -7,11 +13,13 @@ async function resolveViaOCR(payload, ctx) {
     return { ...planBase, is_pdp: false, patch: [], fields: {}, warnings: ["No tabId for OCR"] };
   }
 
+  const t0 = Date.now();
+  try { log("[OCR] start", { url: payload?.url, tabId }); } catch {}
   let capture = null;
   try {
     capture = await captureFullPage(tabId);
   } catch (e) {
-    log("ocrStrategy capture error", String(e?.message || e));
+    log("[OCR] capture error", String(e?.message || e));
     return { ...planBase, is_pdp: false, patch: [], fields: {}, warnings: ["Screenshot capture failed"] };
   }
   if (!capture || typeof capture.dataUrl !== 'string' || !capture.dataUrl) {
@@ -20,6 +28,21 @@ async function resolveViaOCR(payload, ctx) {
 
   let detections = [];
   let imageMeta = capture.meta || {};
+  // Do not download the captured image; only log metadata for debugging
+  try {
+    const len = capture.dataUrl.length;
+    log("[OCR] capture ok", {
+      took_ms: Date.now() - t0,
+      data_len: len,
+      meta: {
+        w: imageMeta?.image_pixel_width,
+        h: imageMeta?.image_pixel_height,
+        dpr: imageMeta?.device_pixel_ratio,
+        page_w_css: imageMeta?.page_width_css,
+        page_h_css: imageMeta?.page_height_css,
+      }
+    });
+  } catch {}
   try {
     const traceId = makeTraceId ? makeTraceId() : `pdp-${Date.now().toString(16)}`;
     const body = JSON.stringify({
@@ -33,8 +56,10 @@ async function resolveViaOCR(payload, ctx) {
       page_width_css: imageMeta.page_width_css,
       page_height_css: imageMeta.page_height_css,
     });
+    log("[OCR] backend fetch →", { traceId, bytes: body.length });
     const resp = await fetch(PROXY_OCR_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-trace-id': traceId }, body });
     const text = await resp.text();
+    log("[OCR] backend ←", { status: resp.status, ok: resp.ok, bytes: text.length });
     const obj = JSON.parse(text);
     if (obj && Array.isArray(obj.detections)) {
       detections = obj.detections;
@@ -42,7 +67,7 @@ async function resolveViaOCR(payload, ctx) {
       throw new Error(String(obj?.error || 'Invalid OCR response'));
     }
   } catch (e) {
-    log("ocrStrategy backend error", String(e?.message || e));
+    log("[OCR] backend error", String(e?.message || e));
     return { ...planBase, is_pdp: false, patch: [], fields: {}, warnings: ["OCR backend error"] };
   }
 
@@ -51,8 +76,9 @@ async function resolveViaOCR(payload, ctx) {
   try {
     const results = await api.scripting.executeScript({ target: { tabId }, func: selectorsFromDetections, args: [detections, imageMeta] });
     selectorMap = Array.isArray(results) ? (results[0]?.result || {}) : {};
+    try { log("[OCR] selector mapping", { detections: detections.length, mapped: Object.keys(selectorMap || {}).length }); } catch {}
   } catch (e) {
-    log("ocrStrategy selector mapping error", String(e?.message || e));
+    log("[OCR] selector mapping error", String(e?.message || e));
   }
 
   // Aggregate proposed values per type from detections
@@ -101,74 +127,99 @@ async function resolveViaOCR(payload, ctx) {
   }
 
   const hasAny = Object.keys(fields).length > 0;
+  try { log("[OCR] done", { is_pdp: hasAny, fields: Object.keys(fields), patch_steps: patch.length, took_ms: Date.now() - t0 }); } catch {}
   return { ...planBase, is_pdp: hasAny, patch, fields };
 }
 
+/** Capture a full-page image using html2canvas injected in the tab. */
 async function captureFullPage(tabId) {
-  // Measure page metrics in the tab
-  const [{ result: metrics } = { result: null }] = await api.scripting.executeScript({ target: { tabId }, func: () => {
+  const viaH2C = await captureViaHtml2Canvas(tabId);
+  if (!viaH2C || typeof viaH2C.dataUrl !== 'string' || !viaH2C.dataUrl.startsWith('data:image/')) {
+    throw new Error('html2canvas capture failed');
+  }
+  return viaH2C;
+}
+
+/** Inject vendor html2canvas and capture DOM → data URL with metadata. */
+async function captureViaHtml2Canvas(tabId) {
+  // Inject bundled html2canvas script into the tab's isolated world (bypasses page CSP)
+  try { await api.scripting.executeScript({ target: { tabId }, files: ["vendor/html2canvas.min.js"] }); log("[OCR] injected html2canvas vendor script"); } catch (e) { log("[OCR] inject vendor failed", String(e?.message || e)); }
+  const [{ result } = { result: null }] = await api.scripting.executeScript({ target: { tabId }, func: async () => {
+    const html = document.documentElement; const body = document.body;
+    const prevHtml = html.style.scrollBehavior; const prevBody = body.style.scrollBehavior;
+    html.style.scrollBehavior = 'auto'; body.style.scrollBehavior = 'auto';
     const dpr = window.devicePixelRatio || 1;
-    const doc = document.scrollingElement || document.documentElement || document.body;
-    const w = Math.max(doc.clientWidth, window.innerWidth || 0);
-    const h = Math.max(doc.scrollHeight, doc.clientHeight, window.innerHeight || 0);
-    const vh = window.innerHeight || doc.clientHeight || 0;
-    return { dpr, pageWidth: w, pageHeight: h, viewportHeight: vh };
-  }});
-  if (!metrics) throw new Error('Failed to read page metrics');
-
-  const { dpr, pageWidth, pageHeight, viewportHeight } = metrics;
-  const steps = [];
-  let y = 0;
-  while (y < pageHeight - 1) {
-    steps.push(y);
-    y += Math.max(64, viewportHeight - 16); // small overlap
-  }
-  const images = [];
-  for (const top of steps) {
-    await api.scripting.executeScript({ target: { tabId }, func: (t) => { window.scrollTo(0, t); }, args: [top] });
-    await new Promise(r => setTimeout(r, 150));
-    const url = await api.tabs.captureVisibleTab(undefined, { format: 'png' });
-    images.push({ y: top, url });
-  }
-
-  // Stitch images using OffscreenCanvas
-  const first = images[0];
-  const firstBitmap = await createImageBitmap(await (await fetch(first.url)).blob());
-  const imgWidth = firstBitmap.width; // already in device pixels
-  const totalHeightPx = Math.round(pageHeight * dpr);
-  const canvas = new OffscreenCanvas(imgWidth, totalHeightPx);
-  const ctx2d = canvas.getContext('2d');
-  if (!ctx2d) throw new Error('No 2D context');
-  for (const im of images) {
-    const bmp = await createImageBitmap(await (await fetch(im.url)).blob());
-    const destY = Math.round(im.y * dpr);
-    ctx2d.drawImage(bmp, 0, destY);
-  }
-  const blob = await canvas.convertToBlob({ type: 'image/png' });
-  const dataUrl = await blobToDataURL(blob);
-  return {
-    dataUrl,
-    meta: {
-      image_pixel_width: imgWidth,
-      image_pixel_height: totalHeightPx,
-      device_pixel_ratio: dpr,
-      page_width_css: pageWidth,
-      page_height_css: pageHeight,
-    }
-  };
-}
-
-async function blobToDataURL(blob) {
-  return await new Promise((resolve, reject) => {
+    const w = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth, window.innerWidth || 0);
+    const h = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, window.innerHeight || 0);
     try {
-      const fr = new FileReader();
-      fr.onload = () => resolve(String(fr.result || ''));
-      fr.onerror = reject;
-      fr.readAsDataURL(blob);
-    } catch (e) { reject(e); }
-  });
+      // Ensure the page is fully loaded before capture
+      async function waitForLoad(timeoutMs = 6000){
+        if (document.readyState !== 'complete') {
+          await new Promise((resolve) => {
+            const to = setTimeout(resolve, timeoutMs);
+            window.addEventListener('load', () => { clearTimeout(to); resolve(undefined); }, { once: true });
+          });
+        }
+        // Wait for fonts
+        try {
+          var fonts = (document && document.fonts && typeof document.fonts.ready === 'object' && typeof document.fonts.ready.then === 'function') ? document.fonts.ready : Promise.resolve();
+          await Promise.race([fonts, new Promise(function(r){ setTimeout(r, 1500); })]);
+        } catch {}
+        // Try decoding images best-effort with a cap
+        try {
+          const imgs = Array.from(document.images || []);
+          const pending = imgs.filter(img => !(img.complete && img.naturalWidth > 0));
+          const tasks = pending.slice(0, 200).map(function(img){
+            var p = (typeof img.decode === 'function') ? img.decode() : new Promise(function(res){ img.addEventListener('load', res, { once: true }); img.addEventListener('error', res, { once: true }); });
+            return Promise.race([p, new Promise(function(r){ setTimeout(r, 1200); })]);
+          });
+          await Promise.race([Promise.all(tasks), new Promise(function(r){ setTimeout(r, 2000); })]);
+        } catch {}
+        // Settle layout
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50))));
+      }
+      await waitForLoad();
+      const h2c = (window && (window).html2canvas) ? (window).html2canvas : null;
+      if (!h2c || typeof h2c !== 'function') throw new Error('html2canvas not available: ensure vendor/html2canvas.min.js is packaged');
+      window.scrollTo(0, 0);
+      const canvas = await h2c(document.documentElement, {
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff',
+        scale: Math.max(1, Math.min(2, dpr)),
+        windowWidth: w,
+        windowHeight: h,
+        scrollX: 0,
+        scrollY: 0,
+        logging: false,
+      });
+      const dataUrl = canvas.toDataURL('image/png');
+      return {
+        dataUrl,
+        meta: {
+          image_pixel_width: canvas.width,
+          image_pixel_height: canvas.height,
+          device_pixel_ratio: dpr,
+          page_width_css: w,
+          page_height_css: h,
+        }
+      };
+    } finally {
+      html.style.scrollBehavior = prevHtml || '';
+      body.style.scrollBehavior = prevBody || '';
+    }
+  }});
+  if (!result) throw new Error('html2canvas result missing');
+  try { log("[OCR] html2canvas produced image", { w: result?.meta?.image_pixel_width, h: result?.meta?.image_pixel_height, len: (result?.dataUrl || '').length }); } catch {}
+  return result;
 }
 
+//
+
+/**
+ * Execute in page context: map detections (image pixel bboxes) to CSS selectors
+ * by maximizing IoU against visible text containers.
+ */
 function selectorsFromDetections(detections, meta) {
   function normalize(s){
     try { return String(s || '').replace(/\s+/g,' ').trim().toLowerCase(); } catch { return ''; }
@@ -249,5 +300,3 @@ function selectorsFromDetections(detections, meta) {
 }
 
 self.resolveViaOCR = resolveViaOCR;
-
-

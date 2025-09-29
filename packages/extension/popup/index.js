@@ -1,8 +1,10 @@
 
+// popup/index.js — Popup UI for viewing and controlling applied changes
 const api = (typeof browser !== 'undefined') ? browser : chrome;
 const DEBUG = true;
 const log = (...args) => { if (DEBUG) console.debug("[PDP][popup]", ...args); };
 
+/** Initialize popup: load plan, render diffs, bind actions. */
 async function init(){
   log("init popup");
   const [tab] = await api.tabs.query({ active:true, currentWindow:true });
@@ -36,6 +38,7 @@ async function init(){
     if (summary && typeof summary === 'object') latestSummary = summary;
   } catch {}
 
+  /** Render diff for a single field with selector and prev/current panes. */
   const renderFieldDiff = (key, label) => {
     const f = plan.fields?.[key] || {};
     const hasSelector = typeof f.selector === 'string' && f.selector.length > 0;
@@ -202,6 +205,7 @@ async function init(){
     });
   }
 
+  /** Build an inverse plan from an apply summary. */
   function buildRevertFromSummary(plan, summary){
     const inv = { ...plan, patch: [] };
     const steps = Array.isArray(summary?.results) ? summary.results : [];
@@ -225,6 +229,7 @@ async function init(){
     return inv;
   }
 
+  /** Build a forward plan (re-apply) from an apply summary. */
   function buildReapplyFromSummary(plan, summary){
     const fwd = { ...plan, patch: [] };
     const steps = Array.isArray(summary?.results) ? summary.results : [];
@@ -268,6 +273,7 @@ async function init(){
   });
 }
 
+// Legacy inverse helper (kept for reference)
 function makeInverse(plan){
   const inv = JSON.parse(JSON.stringify(plan));
   inv.patch = [];
@@ -282,6 +288,7 @@ function makeInverse(plan){
   return inv;
 }
 
+/** Bind Settings link to open the options page. */
 function bindOptions(){
   const link = document.getElementById("openOptions");
   if (link) link.addEventListener("click", (e)=>{

@@ -44,9 +44,9 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "popup/*",
         "icons/*",
-        "styles/*"
+        "popup/*",
+        "vendor/*"
       ],
       "matches": [
         "<all_urls>"

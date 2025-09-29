@@ -1,4 +1,6 @@
 
+// content/content.js — Injected script that collects context and triggers plan
+// resolution. Applies no heuristics; delegates decision-making to the backend.
 const api = (typeof browser !== 'undefined') ? browser : chrome;
 const DEBUG = true;
 const log = (...args) => { if (DEBUG) console.debug("[PDP][content]", ...args); };
@@ -7,6 +9,7 @@ const log = (...args) => { if (DEBUG) console.debug("[PDP][content]", ...args); 
 
 // Frontend no longer computes heuristics; LLM decides PDP.
 
+/** Collect a minimal set of meta tags for context. */
 function getMeta() {
   const g = (n) => document.querySelector(`meta[property="${n}"], meta[name="${n}"]`)?.getAttribute("content") || null;
   return {
@@ -15,6 +18,7 @@ function getMeta() {
   };
 }
 
+/** Extract and parse JSON-LD blocks from the page (best-effort). */
 function extractJsonLd(){
   try {
     const blocks = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
@@ -39,6 +43,10 @@ function extractJsonLd(){
   } catch { return []; }
 }
 
+/**
+ * Build a reduced, safe HTML from DOM for analysis.
+ * Strips scripts/styles/iframes and most attributes.
+ */
 function sanitizeHtmlFromDom() {
   try {
     const doc = document.cloneNode(true);
@@ -82,6 +90,7 @@ function sanitizeHtmlFromDom() {
   }
 }
 
+/** Main entry: gather payload, request plan, cache and optionally apply. */
 async function main() {
   try {
     const url = location.href;

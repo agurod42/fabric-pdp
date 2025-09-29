@@ -1,5 +1,8 @@
-// JSON-LD-based strategy implementation and helpers (loaded via importScripts)
+// strategies/jsonLdStrategy.js — JSON-LD-based strategy
+// Reads product data from JSON-LD blocks, finds DOM targets, optionally asks
+// the generator for improved copy, and constructs a safe plan.
 
+/** Resolve a plan from JSON-LD data with light DOM matching and generation. */
 async function resolveViaJsonLd(payload, ctx){
   const jsonlds = Array.isArray(payload?.jsonld) ? payload.jsonld : [];
   const product = pickFirstProduct(jsonlds);
@@ -73,6 +76,7 @@ async function resolveViaJsonLd(payload, ctx){
   return { ...planBase, is_pdp: true, patch, fields };
 }
 
+/** Pick the first node in any JSON-LD graph that represents a Product. */
 function pickFirstProduct(jsonlds){
   try {
     for (const item of jsonlds) {
@@ -89,6 +93,7 @@ function pickFirstProduct(jsonlds){
   return null;
 }
 
+/** Extract best-effort text fields from a Product node. */
 function extractProductTexts(p){
   const getFirstString = (v) => {
     try {
@@ -143,6 +148,10 @@ function extractProductTexts(p){
 }
 
 // Executed in the page context to find best selectors for given target texts
+/**
+ * Execute in page: find best selectors for target strings using fuzzy match.
+ * Applies label expansion heuristics to prefer content blocks over headings.
+ */
 function findSelectorsForTargets(targets){
   function normalize(s){
     try { return String(s || '').replace(/\s+/g,' ').trim().toLowerCase(); } catch { return ''; }
