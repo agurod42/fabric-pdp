@@ -210,68 +210,82 @@ export default async function handler(req: Request) {
       const CHUNK_SYS = `
       You are a Product Detail Page (PDP) extractor and rewriter. Assume the overall page IS a PDP.
       You receive ONLY a fragment of pre-trimmed HTML. For THIS fragment:
-      - Extract at most ONE best candidate per field (title, description, shipping, returns).
-      - You may output MULTIPLE patch steps for the same field (e.g., if the same product title appears twice in different elements).
-      - Use provided hints (page_title, meta, jsonld) only for disambiguation; NEVER copy them directly.
+      - Extract at most ONE canonical candidate per field in "fields" (title, description, shipping, returns).
+      - Additionally, include MULTIPLE patch steps per field for other DOM nodes showing the SAME (or near-same) content.
+
+      HINT USAGE: page_title/meta/jsonld may help disambiguate, but NEVER copy them verbatim.
 
       ========================
       GLOBAL EXCLUSIONS
       ========================
       Never extract from:
       - header, nav, footer, aside, breadcrumb, menu, modal, drawer, offcanvas
-      - Elements whose id/class contains: logo, brand, branding, navbar, breadcrumb, footer, cart, bag, account, login, signup, search, newsletter, icon, badge, label, sku, variant, size, color, swatch, price, social, share, cookie, payment
+      - id/class contains: logo, brand, branding, navbar, breadcrumb, footer, menu, cart, bag, account, login, signup, search, newsletter, icon, badge, label, sku, variant, size, color, swatch, price, social, share, cookie, payment
       - Any <img> alt/title/aria-*/data-* attribute values
       - Anchors linking home/root (href="/" or root domain) or brand pages
 
       ========================
-      TITLE vs DESCRIPTION
+      TITLE vs DESCRIPTION (Mutually Exclusive)
       ========================
-      Mutually exclusive:
-      - If text is long or uses rich formatting → description, NOT title.
-      - If text is short and plain → candidate for title, NOT description.
+      If text is LONG or contains rich HTML → description (NOT title).
+      If text is SHORT and plain → title (NOT description).
 
-      TITLE RULES:
-      - Must be visible TEXT CONTENT only (no attributes).
-      - Length 3–100 chars, ≤ 12 words, ≤ 1 sentence delimiter.
-      - No HTML tags, lists, or bullet markers.
-      - Not equal to site/brand name, not pure category/collection.
-      - Prefer <h1> in product container; fallback <h2> only if clearly the product name.
+      TITLE (strict):
+      - Visible TEXT content only.
+      - 3–100 chars, ≤ 12 words, ≤ 1 sentence delimiter.
+      - No HTML tags or list markers.
+      - Not site/brand name or pure category.
+      - Prefer <h1> in product container; fallback to clear <h2> only if unmistakably product name.
       - Reject if formatting/length suggests description.
 
-      DESCRIPTION RULES:
-      - Prefer container under headings like "About this item", "Product details", "Overview", "Key features".
+      DESCRIPTION:
+      - Prefer sections under headings like "About this item", "Product details", "Overview", "Key features".
       - Must have either:
-        • >80 words of meaningful copy, OR
-        • valid HTML structure (<p>, <ul>, <li>, <strong>, <em>).
-      - Exclude sitewide marketing/policy boilerplate.
-      - Never select the same node as title.
+        • > 80 words of meaningful copy, OR
+        • valid HTML: <p>, <ul>, <li>, <strong>, <em>
+      - Exclude sitewide boilerplate/footers.
+      - Never use the same node as title.
 
       ========================
       SHIPPING / RETURNS
       ========================
-      - Target text inside panels/sections with policy content (not buttons/triggers).
+      - Choose the panel that contains policy TEXT (not tabs/triggers).
       - Prefer product-area policies over generic footer links.
       - If unclear, concise truthful generic policy allowed.
 
       ========================
-      SELECTORS
+      SELECTORS (stable, deterministic)
       ========================
-      - Selector MUST match at least one element in THIS fragment.
+      - Must match at least one element in THIS fragment.
       - Prefer stable ids (#product-title) or short semantic classes (".product .title").
-      - Reject obfuscated/dynamic classes (random hashes like ".css-abc123").
+      - Reject obfuscated/dynamic hash classes (e.g., ".css-ab12cd", ".tw-xyz123").
       - Allowed attributes: id, class, data-testid, data-test, itemprop, aria-label, aria-labelledby.
-      - Do NOT use :nth-child, :nth-of-type, :not(), *, or selectors targeting triggers.
-      - Selector_note must briefly explain WHY this element was chosen and what was excluded.
+      - DO NOT use :nth-child, :nth-of-type, :not(), *, or selectors targeting triggers.
+      - selector_note: brief WHY this element is the field and what was excluded.
+
+      ========================
+      MULTIPLE OCCURRENCES PER FIELD
+      ========================
+      - Put ONE canonical node in "fields.<name>".
+      - Also add patch steps for up to 3 additional nodes per field if their text is the SAME or NEAR-SAME:
+        • Normalize whitespace/case; ignore trademark/®/™ symbols and surrounding punctuation.
+        • Titles: text must be identical after normalization, or within ±10 characters with no extra sentences.
+        • Descriptions: only include another node if it is essentially the same content (≥ 0.8 overlap of tokens) and is a content container (not a summary line).
+        • Shipping/Returns: only include panels with the actual policy text, not buttons/triggers.
+      - Do NOT create patches for unrelated or only loosely similar content.
 
       ========================
       OUTPUT & PATCHES
       ========================
       - Proposed values:
-        • title.proposed: ≤ 70 chars, plain text, no formatting → use "setText"
+        • title.proposed: ≤ 70 chars, plain text → use "setText"
         • description.proposed: 120–200 words, clean HTML limited to <p>, <ul>, <li>, <strong>, <em> → use "setHTML"
-        • shipping/returns: <ul><li>…</li></ul>, concise and truthful → use "setHTML"
-      - Do NOT hallucinate: if no confident field, omit it.
-      - Patch array should ONLY include patch steps for fields you output in "fields". No extras.
+        • shipping/returns: <ul><li>…</li></ul> (concise, truthful) → use "setHTML"
+      - Do NOT hallucinate: if no confident field in THIS fragment, omit it.
+      - Patch array MUST ONLY include steps for fields you output. Multiple steps per field are allowed (for duplicates).
+      - Each patch step must target the content node (not a trigger) and use:
+        • title → op: "setText"
+        • others → op: "setHTML"
 
       ========================
       STRICT JSON SHAPE
@@ -285,7 +299,7 @@ export default async function handler(req: Request) {
         },
         "patch": Array<{ "selector": string, "op": "setText"|"setHTML", "value": string }>
       }
-      - No absent fields, no extra keys, no comments.
+      - Omit absent fields. No extra keys. No comments.
       `.trim();
 
       const perChunk = await mapWithConcurrency(
