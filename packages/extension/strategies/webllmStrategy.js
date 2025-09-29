@@ -92,6 +92,15 @@ Choose the MOST SPECIFIC and STABLE selector that uniquely matches EXACTLY ONE e
 - Avoid: generic tags alone (\`h1\`, \`main\`, \`body\`), grouped selectors (\`, \`), wildcards (\`*\`), :nth-child, :contains, attribute substrings with hashes/UUID-like classnames, script/style/meta/link tags.
 - If a field has multiple occurrences in the excerpt, set the field’s primary \`selector\` to the canonical PDP element, then add additional patch steps to cover duplicates (same value).
 - If no safe, content-bearing node exists, leave the field’s selector empty and omit patches for it.
+
+ Field-specific guidance for shipping and returns:
+ - Target the CONTENT CONTAINER that holds policy details (sentences, bullet lists, or a table), not the heading/label/button.
+ - If a heading/label/trigger (e.g., button, summary, tab, link) controls or precedes a panel/section (via proximity or aria-controls), select the associated panel/section that contains the detailed text.
+ - Prefer elements whose text includes policy-like signals:
+   - Shipping: time frames (e.g., "business days"), methods (standard/express), regions, carriers, costs/fees, thresholds (e.g., "free over $X").
+   - Returns: return window (e.g., "30 days"), refund/exchange instructions, eligibility/condition checks, restocking fees, exceptions, RMA instructions.
+ - Avoid selecting global navigation/footer/help-center blocks or standalone policy links. Stay within the product details area when possible.
+ - When both a trigger and a panel exist, DO NOT select the trigger; select the panel with substantive text (typically ≥ 80 characters) or a bullet list.
 ########################
 # CONTENT RULES
 ########################
@@ -162,14 +171,26 @@ Choose the MOST SPECIFIC and STABLE selector that uniquely matches EXACTLY ONE e
               }
               if (typeof g.CreateMLCEngine === 'function') {
                 const engine = await g.CreateMLCEngine(MODEL, {});
-                if (engine && engine.chat && engine.chat.completions && typeof engine.chat.completions.create === 'function') {
-                  const comp = await engine.chat.completions.create({ messages, stream: false });
-                  return String(comp?.choices?.[0]?.message?.content || '').trim();
-                }
+                // Prefer simpler generate() API to avoid WASM binding vector type issues
                 if (engine && typeof engine.generate === 'function') {
                   const merged = messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
                   const txt = await engine.generate(merged);
                   return String(txt || '').trim();
+                }
+                if (engine && engine.chat && engine.chat.completions && typeof engine.chat.completions.create === 'function') {
+                  try {
+                    const comp = await engine.chat.completions.create({ messages, stream: false });
+                    return String(comp?.choices?.[0]?.message?.content || '').trim();
+                  } catch (e) {
+                    const msg = String(e && e.message || e);
+                    if (/Vector(Int|String)/i.test(msg) || /instance of/i.test(msg)) {
+                      // Fallback to generate if the bindings complain about typed vectors
+                      const merged = messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
+                      const txt = await engine.generate(merged);
+                      return String(txt || '').trim();
+                    }
+                    throw e;
+                  }
                 }
               }
               throw new Error('No WebLLM chat factory found');
@@ -184,7 +205,7 @@ Choose the MOST SPECIFIC and STABLE selector that uniquely matches EXACTLY ONE e
             }
 
             // Per-chunk extraction prompt that yields compact JSON
-            const CHUNK_SYS = 'You analyze a fragment of sanitized HTML from a product page. Output STRICT JSON with keys: { "pdp_signals": string[], "anti_pdp_signals": string[], "candidates": { "title": Array<{selector:string, text:string}>, "description": Array<{selector:string, html:string}>, "shipping": Array<{selector:string, html:string}>, "returns": Array<{selector:string, html:string}> } }. Choose precise selectors that uniquely match within the provided fragment only. If none, use empty arrays. No comments.';
+            const CHUNK_SYS = 'You analyze a fragment of sanitized HTML from a product page. Output STRICT JSON with keys: { "pdp_signals": string[], "anti_pdp_signals": string[], "candidates": { "title": Array<{selector:string, text:string}>, "description": Array<{selector:string, html:string}>, "shipping": Array<{selector:string, html:string}>, "returns": Array<{selector:string, html:string}> } }. For shipping/returns candidates, include only CONTENT containers (policy text, bullet lists, or tables) and avoid headings/labels/triggers; if a trigger controls a panel, select the panel content. Choose precise selectors that uniquely match within the provided fragment only. If none, use empty arrays. No comments.';
 
             function buildChunkUser(i, total, htmlFrag){
               return `Chunk ${i+1}/${total} HTML:\n` + htmlFrag;

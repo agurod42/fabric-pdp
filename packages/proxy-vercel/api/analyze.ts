@@ -69,6 +69,15 @@ export default async function handler(req) {
         - If a field has multiple occurrences in the excerpt, set the field’s primary \`selector\` to the canonical PDP element, then add **additional** patch steps to cover duplicates (same value).
         - If no safe, content-bearing node exists, leave the field’s selector empty and omit patches for it.
 
+        Field-specific guidance for shipping and returns:
+        - Target the CONTENT CONTAINER that holds policy details (sentences, bullet lists, or a table), not the heading/label/button.
+        - If a heading/label/trigger (e.g., button, summary, tab, link) controls or precedes a panel/section (via proximity or aria-controls), select the associated panel/section that contains the detailed text.
+        - Prefer elements whose text includes policy-like signals:
+          - Shipping: time frames (e.g., "business days"), methods (standard/express), regions, carriers, costs/fees, thresholds (e.g., "free over $X").
+          - Returns: return window (e.g., "30 days"), refund/exchange instructions, eligibility/condition checks, restocking fees, exceptions, RMA instructions.
+        - Avoid selecting global navigation/footer/help-center blocks or standalone policy links. Stay within the product details area when possible.
+        - When both a trigger and a panel exist, DO NOT select the trigger; select the panel with substantive text (typically ≥ 80 characters) or a bullet list.
+
         ########################
         # CONTENT RULES
         ########################
@@ -209,7 +218,7 @@ export default async function handler(req) {
       const chunks: string[] = [];
       for (let i = 0; i < html.length; i += CHUNK_SIZE) chunks.push(html.slice(i, i + CHUNK_SIZE));
 
-      const CHUNK_SYS = 'You analyze a fragment of sanitized HTML from a product page. Output STRICT JSON with keys: { "pdp_signals": string[], "anti_pdp_signals": string[], "candidates": { "title": Array<{selector:string, text:string}>, "description": Array<{selector:string, html:string}>, "shipping": Array<{selector:string, html:string}>, "returns": Array<{selector:string, html:string}> } }. Choose precise selectors that uniquely match within the provided fragment only. If none, use empty arrays. No comments.';
+      const CHUNK_SYS = 'You analyze a fragment of sanitized HTML from a product page. Output STRICT JSON with keys: { "pdp_signals": string[], "anti_pdp_signals": string[], "candidates": { "title": Array<{selector:string, text:string}>, "description": Array<{selector:string, html:string}>, "shipping": Array<{selector:string, html:string}>, "returns": Array<{selector:string, html:string}> } }. For shipping/returns candidates, include only CONTENT containers (policy text, bullet lists, or tables) and avoid headings/labels/triggers; if a trigger controls a panel, select the panel content. Choose precise selectors that uniquely match within the provided fragment only. If none, use empty arrays. No comments.';
       const buildChunkUser = (i: number, total: number, frag: string) => `Chunk ${i+1}/${total} HTML:\n` + frag;
 
       let agg: any = null;
