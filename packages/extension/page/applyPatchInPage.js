@@ -1,6 +1,5 @@
-// Runs in the page context via chrome.scripting.executeScript
 function applyPatchInPage(plan) {
-  const log = (...args) => { try { console.debug("[PDP][apply]", ...args); } catch(_){} };
+  const log = () => {};
   const deny = /(?:<script|javascript:|on\w+=|<iframe|<object)/i;
   const PREFIX = "[PDP] ";
   const ensurePrefixed = (s) => (typeof s === "string" && !s.startsWith(PREFIX)) ? (PREFIX + s) : s;

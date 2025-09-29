@@ -1,14 +1,6 @@
 
-// background.js — Service worker entry for the extension
-// Responsibilities:
-// - Messaging hub between content scripts and UI
-// - Plan resolution via LLM strategy
-// - Applying patches in page via scripting
-// - Badge state and lightweight session caching
 const api = (typeof browser !== 'undefined') ? browser : chrome;
-const PROXY_URL = "https://fabric-pdp.vercel.app/api/analyze"; // set your deployed URL
-const PROXY_GENERATE_URL = "https://fabric-pdp.vercel.app/api/generate";
-const DEBUG = true;
+const DEBUG = false;
 const log = (...args) => { if (DEBUG) console.debug("[PDP][bg]", ...args); };
 
 /**
@@ -48,12 +40,14 @@ const STRATEGY_DEFAULT_ID = "llmStrategy";
 const STRATEGY_REGISTRY = {
   heuristicsStrategy: async (payload, ctx) => {
     if (typeof self.heuristicsStrategy === 'function') return await self.heuristicsStrategy(payload, ctx);
-    // Fallback: if missing, delegate to LLM
-    return await callLLM(payload);
+    // Fallback: delegate to LLM strategy if present
+    if (typeof self.llmStrategy === 'function') return await self.llmStrategy(payload);
+    throw new Error('No strategy available');
   },
   // Strategy ID: resolver function. Signature: (payload, ctx) => Promise<plan>
   llmStrategy: async (payload /*, ctx */) => {
-    return await (self.llmStrategy ? self.llmStrategy(payload) : callLLM(payload));
+    if (typeof self.llmStrategy === 'function') return await self.llmStrategy(payload);
+    throw new Error('llmStrategy not available');
   },
 };
 
@@ -267,69 +261,5 @@ async function resolvePlanWithStrategy(payload, tabId){
 }
 
 
-/**
- * Ask backend generator for improved field values.
- * Returns object like { title, description, shipping, returns } or throws on error.
- */
-async function generateValues(input){
-  const traceId = (typeof self.makeTraceId === 'function') ? self.makeTraceId() : makeTraceId();
-  const body = JSON.stringify({ ...input, trace_id: traceId });
-  const resp = await fetch(PROXY_GENERATE_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-trace-id": traceId },
-    body,
-  });
-  const text = await resp.text();
-  try {
-    const obj = JSON.parse(text);
-    if (obj && typeof obj === 'object' && !obj.error) return obj;
-    throw new Error(String(obj?.error || 'Invalid generator response'));
-  } catch (e) {
-    log("generateValues parse error", { error: String(e?.message || e), len: text?.length || 0 });
-    throw e;
-  }
-}
-
 // moved to utils/utils.js
-
-/** Call the analyze endpoint and validate the returned plan schema. */
-async function callLLM(payload) {
-  const t0 = Date.now();
-  const traceId = makeTraceId();
-  try {
-    const approx = {
-      html_excerpt_len: typeof payload?.html_excerpt === "string" ? payload.html_excerpt.length : 0,
-    };
-    log("callLLM → fetch", { traceId, url: payload?.url, approx });
-    const body = JSON.stringify({ ...payload, trace_id: traceId });
-    const resp = await fetch(PROXY_URL, { method: "POST", headers: { "Content-Type": "application/json", "x-trace-id": traceId }, body });
-    const text = await resp.text();
-    let plan;
-    try { plan = JSON.parse(text); } catch(e) {
-      log("callLLM parse error", { traceId, error: String(e?.message || e), text_len: text?.length || 0 });
-      throw e;
-    }
-    log("callLLM ← response", { traceId, status: resp.status, took_ms: Date.now() - t0, bytes: text?.length || 0, keys: Object.keys(plan || {}) });
-    // Surface backend error messages to the UI
-    if (plan && typeof plan.error === 'string' && plan.error.trim().length > 0) {
-      throw new Error(String(plan.error));
-    }
-    if (!plan || typeof plan.is_pdp !== "boolean") {
-      log("callLLM schema invalid", { traceId, keys: Object.keys(plan || {}) });
-      throw new Error("Invalid plan schema");
-    }
-    const deny = /(?:<script|javascript:|on\w+=|<iframe|<object|fetch\(|XMLHttpRequest|WebSocket|eval|Function|import\(|window\.|document\.write|chrome\.|browser\.)/i;
-    // Minimal validation: ensure array and allowed ops
-    plan.patch = Array.isArray(plan.patch) ? plan.patch.filter(st => st && typeof st.selector === "string" && ["setText","setHTML"].includes(st.op)) : [];
-    for (const k of ["title","description","shipping","returns"]) {
-      const f = plan.fields?.[k];
-      if (f && typeof f.proposed === "string" && deny.test(f.proposed)) f.proposed = "";
-    }
-    log("callLLM parsed", { traceId, is_pdp: plan.is_pdp, patch: plan.patch.length, took_ms: Date.now() - t0 });
-    return plan;
-  } catch (e) {
-    console.error("[PDP][bg] callLLM error", { traceId, error: e });
-    throw e;
-  }
-}
 

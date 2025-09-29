@@ -18,11 +18,7 @@ export function createStream() {
   return { readable, writer, encoder, headers };
 }
 
-export async function readJsonSafe<T = any>(req: Request): Promise<T | {}> {
-  try { return (await req.json()) as T; } catch { return {}; }
-}
-
-export function safeString(input: any): string { return typeof input === "string" ? input : ""; }
+// (removed) readJsonSafe and safeString are unused
 
 export function buildOpenAIEnv() {
   const base = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";

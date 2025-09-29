@@ -1,5 +1,5 @@
 export const config = { runtime: "edge" };
-import { jsonResponse, createStream, safeString, buildOpenAIEnv, buildOpenAIHeaders } from "./_utils";
+import { jsonResponse, createStream, buildOpenAIEnv, buildOpenAIHeaders } from "./_utils";
 
 export default async function handler(req) {
   const t0 = Date.now();
@@ -12,14 +12,7 @@ export default async function handler(req) {
   });
   const traceId = (typeof trace_id === "string" && trace_id) ? trace_id : "";
 
-  try {
-    const sizes = {
-      html_excerpt_len: typeof html_excerpt === "string" ? html_excerpt.length : 0,
-      title_len: typeof title === "string" ? title.length : 0,
-      meta_keys: meta ? Object.keys(meta).length : 0,
-    };
-    console.debug("[PDP][api] request", { traceId, url, lang: language, sizes });
-  } catch {}
+  
 
   // Prepare streaming response to send an early byte and avoid initial-response timeout
   const { readable, writer, encoder, headers } = createStream();
@@ -162,14 +155,7 @@ export default async function handler(req) {
 
       const { base: OPENAI_BASE, model: OPENAI_MODEL, apiKey: OPENAI_API_KEY } = buildOpenAIEnv();
 
-      try {
-        console.debug("[PDP][api] llm config", {
-          traceId,
-          base: OPENAI_BASE,
-          model: OPENAI_MODEL,
-          api_key_present: !!OPENAI_API_KEY,
-        });
-      } catch {}
+      
 
       if (!OPENAI_API_KEY) {
         await writer.write(encoder.encode(JSON.stringify({ error: "Server misconfiguration: OPENAI_API_KEY is required" })));
@@ -184,9 +170,7 @@ export default async function handler(req) {
         if (responseFormatJson) body.response_format = { type: "json_object" } as any;
         const t0f = Date.now();
         const resp = await fetch(`${OPENAI_BASE}/chat/completions`, { method: "POST", headers: headersInit, body: JSON.stringify(body) });
-        try {
-          console.debug("[PDP][api] llm fetch", { traceId, status: resp.status, ok: resp.ok, took_ms: Date.now() - t0f });
-        } catch {}
+        
         if (!resp.ok) {
           let errTxt = ""; try { errTxt = await resp.text(); } catch {}
           throw new Error(`OpenAI error ${resp.status}: ${errTxt || resp.statusText || "no body"}`);
@@ -253,11 +237,7 @@ export default async function handler(req) {
       if (!agg) throw new Error("Aggregation failed: no aggregated summary available");
       const finalPayload = { url: payload.url, title: payload.title, meta: payload.meta, language: payload.language, trace_id: traceId, aggregated: agg, html_excerpt: "" };
       const messages = [ { role: "system", content: SYS_PROMPT }, { role: "user", content: JSON.stringify(finalPayload) } ];
-      try {
-        const sys = typeof messages[0]?.content === "string" ? messages[0].content : "";
-        const usr = typeof messages[1]?.content === "string" ? messages[1].content : "";
-        console.debug("[PDP][api] llm final prompt", { traceId, sys_len: sys.length, usr_len: usr.length });
-      } catch {}
+      
 
       const txt = await chat(messages, true);
       const start = txt.indexOf("{");
@@ -313,24 +293,12 @@ export default async function handler(req) {
         };
         obj.patch = normalizePatch(obj.patch);
         const enriched = JSON.stringify(obj);
-        try {
-          console.debug("[PDP][api] llm parsed ok", {
-            traceId,
-            took_ms: Date.now() - t0,
-            is_pdp: !!obj?.is_pdp,
-            patch: Array.isArray(obj?.patch) ? obj.patch.length : 0,
-          });
-        } catch {}
+        
         await writer.write(encoder.encode(enriched));
         await writer.close();
         return;
       }
-      console.debug("[PDP][api] llm raw passthrough", {
-        traceId,
-        took_ms: Date.now() - t0,
-        content_len: txt.length,
-        raw_len: raw.length,
-      });
+      
       await writer.write(encoder.encode(raw));
       await writer.close();
     } catch (e: any) {

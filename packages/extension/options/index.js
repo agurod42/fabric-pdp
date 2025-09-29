@@ -1,7 +1,6 @@
 
-// options/index.js — Settings page logic for strategy and whitelist management
 const api = (typeof browser !== 'undefined') ? browser : chrome;
-const DEBUG = true;
+const DEBUG = false;
 const log = (...args) => { if (DEBUG) console.debug("[PDP][options]", ...args); };
 
 /** Available strategy choices displayed in selects. */

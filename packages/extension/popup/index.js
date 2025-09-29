@@ -1,7 +1,6 @@
 
-// popup/index.js — Popup UI for viewing and controlling applied changes
 const api = (typeof browser !== 'undefined') ? browser : chrome;
-const DEBUG = true;
+const DEBUG = false;
 const log = (...args) => { if (DEBUG) console.debug("[PDP][popup]", ...args); };
 
 /** Initialize popup: load plan, render diffs, bind actions. */
@@ -282,20 +281,7 @@ async function init(){
   });
 }
 
-// Legacy inverse helper (kept for reference)
-function makeInverse(plan){
-  const inv = JSON.parse(JSON.stringify(plan));
-  inv.patch = [];
-  for (const key of ["title","description","shipping","returns"]) {
-    const f = plan.fields?.[key];
-    if (f?.selector) {
-      const val = (typeof f.original === 'string') ? f.original : '';
-      inv.patch.push({ selector: f.selector, op: (f.html ? "setHTML" : "setText"), value: val });
-    }
-  }
-  log("inverse built", { steps: inv.patch.length });
-  return inv;
-}
+// (removed) legacy makeInverse helper
 
 /** Bind Settings link to open the options page. */
 function bindOptions(){

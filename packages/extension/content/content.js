@@ -1,13 +1,9 @@
 
-// content/content.js — Injected script that collects context and triggers plan
-// resolution. Applies no heuristics; delegates decision-making to the backend.
 const api = (typeof browser !== 'undefined') ? browser : chrome;
-const DEBUG = true;
+const DEBUG = false;
 const log = (...args) => { if (DEBUG) console.debug("[PDP][content]", ...args); };
 
-// Deprecated truncation flags removed
 
-// Frontend no longer computes heuristics; LLM decides PDP.
 
 /** Collect a minimal set of meta tags for context. */
 function getMeta() {

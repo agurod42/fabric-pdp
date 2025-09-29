@@ -4,11 +4,6 @@
 (function(){
 const api = (typeof browser !== 'undefined') ? browser : chrome;
 
-/** Utility: robust text getter */
-function textOf(el){
-    try { return (el && typeof el.textContent === 'string') ? el.textContent.trim() : ""; } catch { return ""; }
-}
-
 /** Build a minimal scoring evaluation on a reduced HTML string plus meta fields. */
 function evaluateSignals(payload){
 	let score = 0;

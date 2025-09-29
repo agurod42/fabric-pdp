@@ -38,29 +38,5 @@ self.patternToRegex = patternToRegex;
 self.shouldRun = shouldRun;
 self.makeTraceId = makeTraceId;
 
-/**
- * Ensure a vendor script is present in the page by URL. Returns true if present or loaded.
- */
-function ensureVendorScript(tabId, path){
-  const api = (typeof browser !== 'undefined') ? browser : chrome;
-  const url = api.runtime.getURL(path);
-  return new Promise(async (resolve) => {
-    try {
-      const [{ result } = { result: null }] = await api.scripting.executeScript({ target: { tabId }, func: (u) => {
-        return new Promise((res) => {
-          try {
-            const exists = Array.from(document.scripts || []).some(s => s && s.src === u);
-            if (exists) { res(true); return; }
-            const s = document.createElement('script');
-            s.src = u; s.type = 'text/javascript'; s.async = true; s.onload = () => res(true); s.onerror = () => res(false);
-            (document.head || document.documentElement).appendChild(s);
-          } catch { res(false); }
-        });
-      }, args: [url] });
-      resolve(!!result);
-    } catch { resolve(false); }
-  });
-}
-
-self.ensureVendorScript = ensureVendorScript;
+// (removed) ensureVendorScript: no vendor scripts are used
 
