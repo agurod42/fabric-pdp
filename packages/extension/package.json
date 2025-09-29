@@ -1,5 +1,8 @@
 {
   "name": "pdp-rewriter-extension",
   "version": "0.1.0",
-  "private": true
+  "private": true,
+  "scripts": {
+    "build": "bash -c 'set -euo pipefail; rm -rf ../../dist/extension ../../dist/pdp-rewriter-extension.zip; mkdir -p ../../dist/extension; rsync -a --exclude node_modules/ ./ ../../dist/extension/; (cd ../../dist/extension && zip -qr ../pdp-rewriter-extension.zip .); echo Built ../../dist/pdp-rewriter-extension.zip'"
+  }
 }
