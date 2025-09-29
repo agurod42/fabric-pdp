@@ -1,12 +1,12 @@
 ## PDP Rewriter
 
-An MV3 browser extension that detects PDPs (Product Detail Pages) with a pluggable strategy (WebLLM in-page, backend LLM, or fast heuristics), proposes improved copy for key fields, and auto-applies safe DOM edits with revert/re-apply support. A lightweight Vercel Edge proxy provides OpenAI-backed analysis and copy generation.
+An MV3 browser extension that detects PDPs (Product Detail Pages) with a pluggable strategy (backend LLM or fast heuristics), proposes improved copy for key fields, and auto-applies safe DOM edits with revert/re-apply support. A lightweight Vercel Edge proxy provides OpenAI-backed analysis and copy generation.
 
 ### Features
 - **Auto-apply**: Patch DOM with an audit summary; revert/re-apply from popup.
 - **Field extraction**: Title, description, shipping, returns.
 - **PDP detection**: Decide if current page is a merchant PDP.
-- **Strategies**: `webllmStrategy` (local WebGPU), `llmStrategy` (backend), `heuristicsStrategy` (fast local).
+- **Strategies**: `llmStrategy` (backend), `heuristicsStrategy` (fast local).
 - **Whitelist + per-domain strategy overrides**: Configure from Options.
 
 ### Monorepo Layout
@@ -21,7 +21,6 @@ An MV3 browser extension that detects PDPs (Product Detail Pages) with a pluggab
   - **Popup (`popup/`)**: Surfaces status, diffs, and controls (Revert / Re-apply) for the current tab.
   - **Options (`options/`)**: Hosts whitelist configuration and strategy selection/overrides.
 - **Strategies (`strategies/`)**: Produce a strict JSON plan with `is_pdp`, discovered selectors, and a minimal patch.
-  - **`webllmStrategy`**: Runs a local LLM in-page using WebGPU when available. Pros: strong privacy (no page data leaves the device) and good latency after warmup. Cons: device/browser support constraints and larger cold starts.
   - **`llmStrategy`**: Calls a Vercel Edge endpoint backed by OpenAI. Pros: broad compatibility and typically higher model quality. Cons: network latency/cost and data egress (mitigated via DOM reduction and server-side key management).
   - **`heuristicsStrategy`**: Fast, local signal scoring and selector discovery. Pros: instant and offline-friendly. Cons: less accurate PDP detection and lower-quality rewrite proposals.
 - **Edge Proxy (`packages/proxy-vercel/`)**: Stateless endpoints (`/api/analyze`, `/api/generate`) with API keys kept server-side. Edge runtime keeps latencies low globally.
@@ -33,16 +32,13 @@ sequenceDiagram
     participant Content as content/content.js
     participant BG as background.js (MV3)
     participant Page as page/applyPatchInPage.js
-    participant Strategy as Strategy (webllm/llm/heuristics)
+    participant Strategy as Strategy (llm/heuristics)
     participant Edge as Vercel Edge API
 
     User->>Content: Page loads / user opens popup
     Content->>BG: Send reduced DOM excerpt + metadata
     BG->>Strategy: Select per-domain/global strategy
-    alt webllmStrategy
-        Strategy-->>Content: Run WebLLM in-page (WebGPU)
-        Content-->>BG: Return JSON plan
-    else heuristicsStrategy
+    alt heuristicsStrategy
         Strategy-->>BG: Local heuristic plan
     else llmStrategy
         BG->>Edge: POST /api/analyze (excerpt + metadata)
@@ -54,7 +50,7 @@ sequenceDiagram
 ```
 
 #### Key Decisions & Trade-offs
-- **Privacy vs. Quality**: Local `webllmStrategy` keeps data on-device but requires WebGPU and has cold-start costs. Remote `llmStrategy` yields higher quality and broad hardware support at the expense of network egress and costs.
+- **Quality vs. Locality**: `llmStrategy` (backend) generally yields higher quality; `heuristicsStrategy` runs locally and is offline-friendly but less accurate.
 - **Speed vs. Accuracy**: `heuristicsStrategy` is immediate and reliable under constrained environments but less precise than LLM-based approaches.
 - **Safety vs. Flexibility**: Patching is intentionally limited to text/HTML updates on safe elements with sanitization/denylist/prefixing. This reduces risk of breakage or injection but cannot handle complex widget rewrites.
 - **Determinism vs. Rich Context**: DOM is reduced to a small, stable excerpt to make prompts predictable and reduce payload size. Full-page context could improve quality but increases variability, cost, and privacy exposure.
@@ -65,7 +61,6 @@ sequenceDiagram
 ### How It Works
 1) `content/content.js` sanitizes the current DOM into a reduced HTML excerpt + metadata; asks background to resolve a plan.
 2) `background.js` picks a strategy per domain/global setting and resolves a plan:
-   - `webllmStrategy`: Runs WebLLM in the page (WebGPU). Fallbacks to backend on error.
    - `llmStrategy`: Calls the Vercel `analyze` endpoint (OpenAI backed) to return a plan.
    - `heuristicsStrategy`: Fast local signal scoring + selector discovery.
 3) If `plan.is_pdp` is true, background applies `plan.patch` in-page via `page/applyPatchInPage.js` and caches an apply summary.
@@ -76,7 +71,6 @@ Selectors and content are validated to avoid script injection; patch operations 
 ### Strategies
 - `heuristicsStrategy`: Fast PDP signal scoring and best-effort selector discovery; returns a schema-compatible plan with empty patches.
 - `llmStrategy`: Calls the Edge API `POST /api/analyze` which uses OpenAI to return a strict JSON plan.
-- `webllmStrategy`: Executes a strict prompt client-side using WebLLM. Requires WebGPU and a WebLLM runtime available in the page context. The repo includes a vendored build at `packages/extension/vendor/webllm.min.js`, but it’s not injected by default; the strategy attempts to use existing globals (`window.WebLLM`/`window.webllm`) and falls back to backend if unavailable.
 
 ### Options
 Open the extension’s Options page:
@@ -148,7 +142,6 @@ This produces an Xcode project under `build-safari/` you can open and sign.
 
 ### Safety & Limitations
 - DOM patching is restricted and sanitized; selectors targeting meta/script/link tags are excluded.
-- WebLLM requires WebGPU-capable browsers/devices; it gracefully falls back to backend.
 
 ### License
 MIT
