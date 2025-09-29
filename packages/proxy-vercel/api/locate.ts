@@ -45,7 +45,7 @@ export default async function handler(req: Request) {
         { role: "system", content: "Return STRICT JSON." },
         { role: "user", content: [
           { type: "text", text: JSON.stringify(prompt) },
-          { type: "input_image", image_url: image_data_url }
+          { type: "image_url", image_url: { url: image_data_url } }
         ] as any }
       ];
 
