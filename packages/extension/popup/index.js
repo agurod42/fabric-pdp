@@ -22,8 +22,11 @@ async function init(){
     const { error } = await api.runtime.sendMessage({ type: "GET_LAST_ERROR", url, tabId });
     if (error) lastError = error;
   } catch {}
-  const res = await api.runtime.sendMessage({ type: "GET_PLAN", url, tabId });
-  const plan = res?.plan;
+  let plan = null;
+  try {
+    const res = await api.runtime.sendMessage({ type: "GET_PLAN", url, tabId });
+    plan = res?.plan;
+  } catch {}
   const app = document.getElementById("app");
   if (!plan) {
     const enc = s => { const d=document.createElement("div"); d.textContent=s; return d.innerHTML; };
