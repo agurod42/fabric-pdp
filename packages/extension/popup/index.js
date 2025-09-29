@@ -89,6 +89,8 @@ async function init(){
 
   const resultHeader = plan.is_pdp ? 'PDP detected' : 'No PDP detected';
   const resultEmoji = plan.is_pdp ? '✅' : 'ℹ️';
+  const tookMs = (plan?.meta && typeof plan.meta.process_ms === 'number') ? plan.meta.process_ms : null;
+  const tookStr = (tookMs != null) ? ` · ${(tookMs/1000).toFixed(2)}s` : '';
   // Build list of additional applied changes beyond the primary field selectors
   let extraAppliedHtml = '';
   try {
@@ -109,7 +111,7 @@ async function init(){
   app.innerHTML = `
     <div class="topbar">
       <div class="left">
-        <h3>${resultEmoji} ${resultHeader}</h3>
+        <h3>${resultEmoji} ${resultHeader}${tookStr}</h3>
       </div>
       <div id="actionsRight" class="right actions icons" style="display:none">
         <button id="saveHtml" class="icon-btn" title="Save reduced HTML" aria-label="Save reduced HTML">

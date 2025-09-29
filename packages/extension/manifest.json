@@ -45,8 +45,7 @@
     {
       "resources": [
         "icons/*",
-        "popup/*",
-        "vendor/*"
+        "popup/*"
       ],
       "matches": [
         "<all_urls>"

@@ -1,0 +1,242 @@
+// strategies/heuristicsStrategy.js — Fast heuristic PDP detector and selector finder
+// Implements a staged scoring approach and returns a plan compatible with LLM output
+// Signature: async function heuristicsStrategy(payload, ctx) => plan
+const api = (typeof browser !== 'undefined') ? browser : chrome;
+
+/** Utility: robust text getter */
+function textOf(el){
+	try { return (el && typeof el.textContent === 'string') ? el.textContent.trim() : ""; } catch { return ""; }
+}
+
+/** Build a minimal scoring evaluation on a reduced HTML string plus meta fields. */
+function evaluateSignals(payload){
+	let score = 0;
+	const html = String(payload?.html_excerpt || "").slice(0, 200000);
+	const meta = payload?.meta || {};
+	const title = String(payload?.title || "");
+	const url = String(payload?.url || "");
+
+	// Quick anti routes
+	if (/\b(cart|checkout|basket|account|orders?|login|register|help|support|search)\b/i.test(url)) return { score: -10 };
+
+	// Structured/meta signals (regex over reduced HTML)
+	if (/\"@type\"\s*:\s*\"Product\"/i.test(html)) score += 3; // JSON-LD Product
+	if (/itemtype\s*=\s*\"[^\"]*schema\.org\/Product/i.test(html)) score += 2; // microdata
+	if (/property=\"og:type\"[^>]*content=\"product\"/i.test(html)) score += 2; // og product
+	if (/property=\"product:price:amount\"/i.test(html)) score += 2;
+
+	// CTA (EN + ES variants)
+	if (/(add to cart|buy now|add to bag|comprar(?: ahora| ya)?|añadir al carrito|añadir a la cesta|añadir a la bolsa|agregar al carrito|agregar a la cesta|agregar a la bolsa)/i.test(html)) score += 3;
+
+	// SKU / variants / qty
+	if (/\b(sku|mpn|model|ref\.?)[\s:]/i.test(html)) score += 2;
+	if (/(select[^>]+name=\"[^\"]*(size|color)|aria-label=\"[^\"]*(Size|Color))/i.test(html)) score += 2;
+	if (/(input[^>]+type=\"number\"[^>]+name=\"[^\"]*(qty|quantity)|aria-label=\"[^\"]*Quantity)/i.test(html)) score += 1;
+
+	// Shipping / Returns (EN + ES)
+	if (/(shipping|env[ií]o|envios|env[íi]os|delivery|entrega|despacho)/i.test(html)) score += 1;
+	if (/(returns?|devoluci[oó]n(?:es)?|cambios?|reembolsos?)/i.test(html)) score += 1;
+
+	// Anti-signals: many cards, facets, pagination
+	const repeatedPriceBlocks = html.match(/(?:\$|€|£)\s?\d[\d.,]*/g)?.length || 0;
+	const productCardHints = (html.match(/(data-product-card|class=\"[^\"]*product-card|data-sku=)/g) || []).length;
+	if (productCardHints >= 6 || repeatedPriceBlocks >= 12) score -= 4;
+	if (/class=\"[^\"]*(pagination)\b/i.test(html) || /aria-label=\"[^\"]*Pagination/i.test(html)) score -= 3;
+	if (/(data-facet|class=\"[^\"]*(facet|filters)\b|aria-label=\"[^\"]*Filter)/i.test(html)) score -= 3;
+
+	// Price near title heuristic via coarse check
+	const hasHeadline = /(\<h1[\s>]|\<h2[\s>]|itemprop=\"name\"|data-(test|qa)[^>]*title)/i.test(html);
+	const hasPrice = /(?:[$€£]\s?\d[\d.,]*)|(?:\d[\d.,]*\s?(?:USD|EUR|GBP))/i.test(html);
+	if (hasHeadline && hasPrice) score += 2;
+
+	return { score };
+}
+
+/** Discover stable selectors for title/description/shipping/returns on live page. */
+async function discoverSelectorsInPage(tabId){
+	try {
+		const [{ result } = { result: {} }] = await api.scripting.executeScript({
+			target: { tabId },
+			func: () => {
+				function txt(el){ try { return (el && typeof el.textContent === 'string') ? el.textContent.trim() : ""; } catch { return ""; } }
+				function visible(el){ try { if (!el) return false; const s = getComputedStyle(el); if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') return false; if (!el.offsetParent && s.position !== 'fixed') return false; const r = el.getBoundingClientRect(); return (r.width * r.height) > 0; } catch { return true; } }
+				function pickSelector(el){
+					if (!el) return "";
+					if (el.id) return `#${CSS.escape(el.id)}`;
+					for (const a of Array.from(el.attributes || [])){
+						const n = (a.name || '').toLowerCase();
+						if (n.startsWith('data-')) return `${el.tagName.toLowerCase()}[${n}="${a.value}"]`;
+					}
+					let cur = el, parts = [];
+					for (let depth=0; cur && depth < 4; depth++) {
+						let sel = cur.tagName ? cur.tagName.toLowerCase() : '';
+						if (cur.classList && cur.classList.length > 0) sel += '.' + Array.from(cur.classList).slice(0,2).map(c=>CSS.escape(c)).join('.');
+						parts.unshift(sel);
+						cur = cur.parentElement;
+					}
+					return parts.join('>');
+				}
+				function preferLongestText(nodes){
+					let best = null, bestLen = 0;
+					for (const el of nodes){
+						const t = txt(el);
+						if (!visible(el)) continue;
+						const len = t.length;
+						if (len > bestLen) { best = el; bestLen = len; }
+					}
+					return best;
+				}
+				const out = {};
+				try {
+					// Title
+					let titleEl = document.querySelector('h1, h2, [itemprop="name"], [data-test*="title"], [data-qa*="title"]');
+					if (titleEl && visible(titleEl)) out.title = pickSelector(titleEl);
+
+					// Description candidates (EN + ES)
+					const descCandidates = Array.from(document.querySelectorAll('[itemprop="description"], .product-description, .product__description, #description, [id*="description" i], [class*="description" i], #descripcion, [id*="descripci" i], [class*="descripci" i]'));
+					let descEl = preferLongestText(descCandidates);
+					// Fallback: pick a visible text block near title with decent length
+					if (!descEl && titleEl) {
+						const scope = titleEl.closest('section, main, article') || document.body;
+						// Prefer blocks preceded by headings with EN/ES description hints
+						const blocks = Array.from(scope.querySelectorAll('p, div, section')).filter(e => visible(e) && txt(e).length >= 120);
+						const headingHint = (el) => {
+							let prev = el.previousElementSibling, hops = 0;
+							while (prev && hops < 4) {
+								if (/^h[1-6]$|^summary$|^button$/i.test(prev.tagName)) {
+									const t = txt(prev).toLowerCase();
+									if (/(description|details|about|product|overview|specifications)|(descripci[oó]n|detalles|acerca|resumen|caracter[ií]sticas|especificaciones)/i.test(t)) return 3;
+								}
+								prev = prev.previousElementSibling; hops++;
+							}
+							return 0;
+						};
+						let best = null, bestScore = 0;
+						for (const b of blocks){
+							const len = txt(b).length;
+							const bonus = headingHint(b);
+							const s = len + bonus * 200;
+							if (s > bestScore) { best = b; bestScore = s; }
+						}
+						descEl = best;
+					}
+					if (descEl) out.description = pickSelector(descEl);
+
+					function inDisallowedChrome(el){
+						try {
+							let n = el;
+							for (let i=0; n && i<6; i++) {
+								const tag = (n.tagName || '').toLowerCase();
+								const role = (n.getAttribute && n.getAttribute('role')) || '';
+								const cls = (n.className || '').toString().toLowerCase();
+								if (tag === 'footer' || tag === 'nav' || tag === 'header' || role === 'navigation' || /\bfooter\b/.test(cls)) return true;
+								n = n.parentElement;
+							}
+							return false;
+						} catch { return false; }
+					}
+
+					function findPanelForTrigger(tr){
+						if (!tr) return null;
+						const ac = tr.getAttribute('aria-controls');
+						if (ac) { const p = document.getElementById(ac); if (p) return p; }
+						let sib = tr.nextElementSibling;
+						while (sib && (/^(svg|img|picture)$/i.test(sib.tagName))) sib = sib.nextElementSibling;
+						if (sib) return sib;
+						// Try parent panel
+						let par = tr.parentElement;
+						for (let i=0; par && i<4; i++){
+							if (/panel|content|section|tab|accordion/i.test(par.className || '')) return par;
+							par = par.parentElement;
+						}
+						return null;
+					}
+
+					function validateAndScorePanel(el, type){
+						if (!el || !visible(el) || inDisallowedChrome(el)) return -1;
+						const t = txt(el).toLowerCase();
+						const idc = ((el.id || '') + ' ' + (el.className || '')).toLowerCase();
+						const len = t.length;
+						if (len < 60) return -1; // too short to be useful
+						const kw = {
+							shipping: {
+								core: /(shipping|env[ií]o|envios|env[íi]os|delivery|entrega|despacho)/i,
+								extra: /(free|gratis|cost|costo|precio|fee|tarifa|times?|tiempo|d[ií]as|days|method|m[eé]todo|carrier|courier|polic[yí]a|pol[ií]tica)/i
+							},
+							returns: {
+								core: /(returns?|devoluci[oó]n(?:es)?|cambios?|reembolsos?)/i,
+								extra: /(policy|pol[ií]tica|period|plazo|days|d[ií]as|refund|exchange|replace|cambio|reembolso)/i
+							}
+						};
+						const set = kw[type];
+						let score = 0;
+						if (set.core.test(t)) score += 3;
+						if (set.extra.test(t)) score += 2;
+						// Bonus for id/class hints
+						if ((type === 'shipping' && /(ship|envio|delivery|entrega|despacho)/i.test(idc)) ||
+							(type === 'returns' && /(return|devolu|reembolso|cambio)/i.test(idc))) score += 2;
+						// Normalize by length but cap influence
+						score += Math.min(3, Math.floor(len / 400));
+						return score;
+					}
+
+					// Shipping
+					const shipTriggers = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,button,[role="tab"],a,summary,[aria-controls]'))
+						.filter(n => /shipping|env[ií]o|envios|env[íi]os|delivery|entrega|despacho/i.test(txt(n)) && !inDisallowedChrome(n));
+					let bestShip = { el: null, score: -1 };
+					for (const tr of shipTriggers){
+						const panel = findPanelForTrigger(tr);
+						const sc = validateAndScorePanel(panel, 'shipping');
+						if (sc > bestShip.score) bestShip = { el: panel, score: sc };
+					}
+					if (bestShip.el && bestShip.score >= 4) out.shipping = pickSelector(bestShip.el);
+
+					// Returns
+					const retTriggers = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,button,[role="tab"],a,summary,[aria-controls]'))
+						.filter(n => /returns?|devoluci[oó]n(?:es)?|cambios?|reembolsos?/i.test(txt(n)) && !inDisallowedChrome(n));
+					let bestRet = { el: null, score: -1 };
+					for (const tr of retTriggers){
+						const panel = findPanelForTrigger(tr);
+						const sc = validateAndScorePanel(panel, 'returns');
+						if (sc > bestRet.score) bestRet = { el: panel, score: sc };
+					}
+					if (bestRet.el && bestRet.score >= 4) out.returns = pickSelector(bestRet.el);
+				} catch {}
+				return out;
+			}
+		});
+		return result || {};
+	} catch { return {}; }
+}
+
+/** Build a plan object consistent with backend schema. */
+async function buildPlan(payload, isPdp, score, ctx){
+	const fields = {};
+	try {
+		const tabId = ctx && typeof ctx.tabId === 'number' ? ctx.tabId : undefined;
+		const sels = tabId != null ? await discoverSelectorsInPage(tabId) : {};
+		if (sels.title) fields.title = { selector: sels.title, html: false };
+		if (sels.description) fields.description = { selector: sels.description, html: true };
+		if (sels.shipping) fields.shipping = { selector: sels.shipping, html: true };
+		if (sels.returns) fields.returns = { selector: sels.returns, html: true };
+	} catch {}
+	return {
+		is_pdp: !!isPdp,
+		score: typeof score === 'number' ? score : undefined,
+		fields,
+		patch: [],
+		meta: { strategy: 'heuristics', url: payload?.url || '' }
+	};
+}
+
+/** Main entry for background: fast PDP detection with optional LLM fallback upstream */
+async function heuristicsStrategy(payload, ctx){
+	const { score } = evaluateSignals(payload);
+	const isPdp = score >= 6;
+	if (score <= 0) return await buildPlan(payload, false, score, ctx);
+	return await buildPlan(payload, isPdp, score, ctx);
+}
+
+self.heuristicsStrategy = heuristicsStrategy;
+
+

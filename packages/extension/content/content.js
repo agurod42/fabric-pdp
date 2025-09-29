@@ -60,25 +60,27 @@ function sanitizeHtmlFromDom() {
     while (walker.nextNode()) comments.push(walker.currentNode);
     comments.forEach(c => c.parentNode && c.parentNode.removeChild(c));
 
-    // Strip dangerous attributes and unwanted attrs; keep only safe structural ones like class/id
-    const nodes = body.querySelectorAll('*');
+    // Strip all attributes except id and class
+    const nodes = [body, ...body.querySelectorAll('*')];
     nodes.forEach((el) => {
-      // Remove inline event handlers and inline style
-      const isImg = (el.tagName || '').toLowerCase() === 'img';
-      Array.from(el.attributes).forEach(attr => {
+      Array.from(el.attributes || []).forEach(attr => {
         const name = attr.name.toLowerCase();
-        const value = attr.value || '';
-        if (name.startsWith('on') || name === 'style') { el.removeAttribute(attr.name); return; }
-        // Remove all hrefs entirely
-        if (name === 'href') { el.removeAttribute('href'); return; }
-        // Remove all data-* attributes
-        if (name.startsWith('data-')) { el.removeAttribute(attr.name); return; }
-        // Remove img src and srcset
-        if (isImg && (name === 'src' || name === 'srcset')) { el.removeAttribute(attr.name); return; }
-        // Extra safety: drop javascript: in any src-like attributes
-        if ((name === 'src' || name === 'xlink:href') && /^\s*javascript:/i.test(value)) { el.removeAttribute(attr.name); return; }
+        if (name !== 'id' && name !== 'class') {
+          el.removeAttribute(attr.name);
+        }
       });
     });
+
+    // Remove empty elements (no text content and no element children), bottom-up
+    const all = Array.from(body.querySelectorAll('*'));
+    for (let i = all.length - 1; i >= 0; i--) {
+      const el = all[i];
+      const hasElementChildren = el.children && el.children.length > 0;
+      const text = (el.textContent || '').replace(/\s+/g, '');
+      if (!hasElementChildren && text.length === 0) {
+        el.remove();
+      }
+    }
 
     // Serialize and minify whitespace
     let html = (body.outerHTML || '').replace(/>\s+</g, '><').replace(/\s{2,}/g, ' ');

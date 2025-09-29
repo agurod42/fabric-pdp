@@ -2,13 +2,12 @@
 // background.js — Service worker entry for the extension
 // Responsibilities:
 // - Messaging hub between content scripts and UI
-// - Plan resolution via pluggable strategies (JSON-LD, LLM, OCR)
+// - Plan resolution via LLM strategy
 // - Applying patches in page via scripting
 // - Badge state and lightweight session caching
 const api = (typeof browser !== 'undefined') ? browser : chrome;
 const PROXY_URL = "https://fabric-pdp.vercel.app/api/analyze"; // set your deployed URL
 const PROXY_GENERATE_URL = "https://fabric-pdp.vercel.app/api/generate";
-const PROXY_OCR_URL = "https://fabric-pdp.vercel.app/api/locate";
 const DEBUG = true;
 const log = (...args) => { if (DEBUG) console.debug("[PDP][bg]", ...args); };
 
@@ -41,24 +40,20 @@ async function cacheGet(key) {
 
 // Load strategies as separate modules into the service worker global scope
 try { importScripts("page/applyPatchInPage.js"); } catch(e) { log("importScripts applyPatchInPage error", e); }
-try { importScripts("strategies/jsonLdStrategy.js"); } catch(e) { log("importScripts jsonLdStrategy error", e); }
 try { importScripts("strategies/llmStrategy.js"); } catch(e) { log("importScripts llmStrategy error", e); }
-try { importScripts("strategies/ocrStrategy.js"); } catch(e) { log("importScripts ocrStrategy error", e); }
+try { importScripts("strategies/heuristicsStrategy.js"); } catch(e) { log("importScripts heuristicsStrategy error", e); }
 try { importScripts("utils/utils.js"); } catch(e) { log("importScripts utils error", e); }
 
-const STRATEGY_DEFAULT_ID = "jsonLdStrategy";
+const STRATEGY_DEFAULT_ID = "llmStrategy";
 const STRATEGY_REGISTRY = {
   // Strategy ID: resolver function. Signature: (payload, ctx) => Promise<plan>
   llmStrategy: async (payload /*, ctx */) => {
     return await (self.llmStrategy ? self.llmStrategy(payload) : callLLM(payload));
   },
-  jsonLdStrategy: async (payload, ctx) => {
-    if (typeof self.resolveViaJsonLd === 'function') return await self.resolveViaJsonLd(payload, ctx);
-    return await resolveViaJsonLd(payload, ctx); // fallback if imported symbol missing
-  },
-  ocrStrategy: async (payload, ctx) => {
-    if (typeof self.resolveViaOCR === 'function') return await self.resolveViaOCR(payload, ctx);
-    return await resolveViaOCR(payload, ctx);
+  heuristicsStrategy: async (payload, ctx) => {
+    if (typeof self.heuristicsStrategy === 'function') return await self.heuristicsStrategy(payload, ctx);
+    // Fallback: if missing, delegate to LLM
+    return await callLLM(payload);
   },
 };
 
@@ -240,17 +235,25 @@ async function resolvePlanWithStrategy(payload, tabId){
   log("RESOLVE_PLAN start", { url: payload?.url });
   const errKey = (tabId != null) ? `error:${tabId}` : undefined;
   try {
+    const t0 = Date.now();
     const settings = await getStrategySettings();
     const strategyId = chooseStrategyIdForUrl(payload?.url || "", settings);
     const resolver = STRATEGY_REGISTRY[strategyId] || STRATEGY_REGISTRY[STRATEGY_DEFAULT_ID];
     const plan = await resolver(payload, { strategyId, tabId });
+    const took = Date.now() - t0;
+    if (plan && typeof plan === 'object') {
+      try {
+        plan.meta = plan.meta && typeof plan.meta === 'object' ? { ...plan.meta } : {};
+        plan.meta.process_ms = took;
+      } catch {}
+    }
     if (tabId != null) {
       const key = `plan:${tabId}`;
       sessionCache.set(key, plan);
       try { await cacheSet(key, plan); } catch {}
       try { if (errKey) { sessionCache.set(errKey, ""); await cacheSet(errKey, ""); } } catch {}
     }
-    log("RESOLVE_PLAN done", { is_pdp: !!plan?.is_pdp, patch: plan?.patch?.length || 0 });
+    log("RESOLVE_PLAN done", { is_pdp: !!plan?.is_pdp, patch: plan?.patch?.length || 0, took_ms: plan?.meta?.process_ms });
     return { plan };
   } catch (e) {
     const msgStr = String(e?.message || e);
