@@ -111,13 +111,17 @@ async function main() {
       // heuristics removed
     };
   log("send RESOLVE_PLAN", approx);
-  try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "…" }); } catch {}
+  try {
+    await api.runtime.sendMessage({ type: "SET_BADGE", text: "…" });
+  } catch {}
+  try { await api.runtime.sendMessage({ type: "SET_LAST_ERROR", error: "" }); } catch {}
+  try { await api.runtime.sendMessage({ type: "SET_PROCESSING", processing: true }); } catch {}
   const res = await api.runtime.sendMessage({ type: "RESOLVE_PLAN", payload });
     let plan = res?.plan;
     if (!plan) {
       const backendError = (typeof res?.error === 'string' && res.error.trim().length > 0) ? res.error : "No plan";
       // Propagate real backend error to background so popup can display it
-      try { await api.runtime.sendMessage({ type: "SET_LAST_ERROR", error: String(backendError) }); } catch {}
+    try { await api.runtime.sendMessage({ type: "SET_LAST_ERROR", error: String(backendError) }); } catch {}
       throw new Error(String(backendError));
     }
 
@@ -137,7 +141,7 @@ async function main() {
       }
     } catch {}
 
-    await api.runtime.sendMessage({ type: "CACHE_PLAN", url, plan });
+  await api.runtime.sendMessage({ type: "CACHE_PLAN", url, plan });
     log("cached plan", { is_pdp: !!plan?.is_pdp, took_ms: Date.now() - t0 });
   await api.runtime.sendMessage({ type: "SET_BADGE", text: plan.is_pdp ? "PDP" : "—" });
 
@@ -153,6 +157,7 @@ async function main() {
     try { await api.runtime.sendMessage({ type: "SET_BADGE", text: "ERR" }); } catch {}
     try { await api.runtime.sendMessage({ type: "SET_LAST_ERROR", error: String(e?.message || e) }); } catch {}
   }
+  try { await api.runtime.sendMessage({ type: "SET_PROCESSING", processing: false }); } catch {}
 }
 
 window.addEventListener("load", () => { log("window load"); setTimeout(main, 600); });

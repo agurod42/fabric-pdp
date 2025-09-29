@@ -163,6 +163,32 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         log("GET_LAST_ERROR", { key, has });
         sendResponse({ error: has ? err : null }); return;
       }
+      if (msg.type === "SET_PROCESSING") {
+        const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
+        const key = (tabId != null) ? `processing:${tabId}` : undefined;
+        const val = !!msg.processing;
+        if (key) {
+          sessionCache.set(key, val);
+          try { await cacheSet(key, val); } catch {}
+          log("SET_PROCESSING", { key, val });
+        }
+        sendResponse({ ok: true }); return;
+      }
+      if (msg.type === "GET_PROCESSING") {
+        const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
+        const key = (tabId != null) ? `processing:${tabId}` : undefined;
+        (async () => {
+          let val = key ? sessionCache.get(key) : undefined;
+          if (typeof val === 'undefined' && key) {
+            val = await cacheGet(key);
+            if (typeof val !== 'undefined') sessionCache.set(key, val);
+          }
+          const processing = !!val;
+          log("GET_PROCESSING", { key, processing });
+          sendResponse({ processing });
+        })();
+        return true;
+      }
       if (msg.type === "SET_LAST_ERROR") {
         const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
         const key = (tabId != null) ? `error:${tabId}` : undefined;
@@ -228,7 +254,10 @@ function safeHostname(urlStr){
 async function resolvePlanWithStrategy(payload, tabId){
   log("RESOLVE_PLAN start", { url: payload?.url });
   const errKey = (tabId != null) ? `error:${tabId}` : undefined;
+  const procKey = (tabId != null) ? `processing:${tabId}` : undefined;
   try {
+    // Mark processing=true for this tab
+    try { if (procKey) { sessionCache.set(procKey, true); await cacheSet(procKey, true); } } catch {}
     const t0 = Date.now();
     const settings = await getStrategySettings();
     const candidateId = chooseStrategyIdForUrl(payload?.url || "", settings);
@@ -257,6 +286,9 @@ async function resolvePlanWithStrategy(payload, tabId){
     try { if (errKey) { sessionCache.set(errKey, msgStr); await cacheSet(errKey, msgStr); } } catch {}
     log("RESOLVE_PLAN error", { error: msgStr });
     return { error: msgStr };
+  } finally {
+    // Clear processing flag
+    try { if (procKey) { sessionCache.set(procKey, false); await cacheSet(procKey, false); } } catch {}
   }
 }
 

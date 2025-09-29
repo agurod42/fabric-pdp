@@ -10,6 +10,12 @@ async function init(){
   const url = tab.url;
   const tabId = tab.id;
   log("current tab", { url });
+  // Ask background if processing is ongoing for this tab
+  let processing = false;
+  try {
+    const { processing: p } = await api.runtime.sendMessage({ type: "GET_PROCESSING", tabId });
+    processing = !!p;
+  } catch {}
   // Fetch any last error early so we can display it even if no plan is cached
   let lastError = null;
   try {
@@ -24,7 +30,10 @@ async function init(){
     const errBox = lastError
       ? `<div id="error" class="error"><div class="card" style="background:#FDE8E8;color:#611A15;border:1px solid #F8B4B4"><strong>Backend error</strong><div class="mono" style="white-space:pre-wrap">${enc(String(lastError))}</div></div></div>`
       : `<div id="error" class="error" style="display:none"></div>`;
-    app.innerHTML = `${errBox}<div class="divider"></div><div class="link"><a id="openOptions" href="#">Settings</a></div>`;
+    const procBox = processing
+      ? `<div id="processing" class="processing"><div class="card" style="background:#EFF6FF;color:#1E3A8A;border:1px solid #BFDBFE">Processing current page…</div></div>`
+      : `<div id="processing" class="processing" style="display:none"></div>`;
+    app.innerHTML = `${procBox}${errBox}<div class="divider"></div><div class="link"><a id="openOptions" href="#">Settings</a></div>`;
     bindOptions();
     return;
   }
@@ -130,6 +139,7 @@ async function init(){
         </button>
       </div>
     </div>
+    ${processing ? `<div id="processing" class="processing"><div class="card" style="background:#EFF6FF;color:#1E3A8A;border:1px solid #BFDBFE">Processing current page…</div></div>` : `<div id=\"processing\" class=\"processing\" style=\"display:none\"></div>`}
     ${strategyStr}
     <div id="error" class="error" style="display:none"></div>
     <div id="diffs" class="diffs">
