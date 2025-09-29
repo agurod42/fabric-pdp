@@ -208,61 +208,84 @@ export default async function handler(req: Request) {
       // Per-chunk: produce fields (single best per field present in fragment) AND patch steps.
       // Multiple selectors per field may appear in the patch (allowed).
       const CHUNK_SYS = `
-You are a Product Detail Page (PDP) extractor and rewriter. Assume the overall page IS a PDP.
-You receive ONLY a fragment of pre-trimmed HTML. For THIS fragment:
-- If a field is present (title, description, shipping, returns), output ONE best candidate in "fields".
-- You may include MULTIPLE patch steps per field (e.g., duplicates in UI).
+      You are a Product Detail Page (PDP) extractor and rewriter. Assume the overall page IS a PDP.
+      You receive ONLY a fragment of pre-trimmed HTML. For THIS fragment:
+      - Extract at most ONE best candidate per field (title, description, shipping, returns).
+      - You may output MULTIPLE patch steps for the same field (e.g., if the same product title appears twice in different elements).
+      - Use provided hints (page_title, meta, jsonld) only for disambiguation; NEVER copy them directly.
 
-You may use provided context hints (page_title, meta, jsonld) to disambiguate what is product content, but DO NOT copy those hints verbatim as page content. Extract only from the HTML fragment.
+      ========================
+      GLOBAL EXCLUSIONS
+      ========================
+      Never extract from:
+      - header, nav, footer, aside, breadcrumb, menu, modal, drawer, offcanvas
+      - Elements whose id/class contains: logo, brand, branding, navbar, breadcrumb, footer, cart, bag, account, login, signup, search, newsletter, icon, badge, label, sku, variant, size, color, swatch, price, social, share, cookie, payment
+      - Any <img> alt/title/aria-*/data-* attribute values
+      - Anchors linking home/root (href="/" or root domain) or brand pages
 
-HARD EXCLUSIONS (never select from these):
-- Tags/areas: header, nav, footer, aside, breadcrumb, menu, modal, drawer, offcanvas
-- Elements whose id/class contains: logo, brand, branding, navbar, header, breadcrumb, footer, menu, cart, bag, account, login, signup, search, newsletter, icon, badge, label, sku, variant, size, color, price, social, share, cookie, payment
-- Any <img> alt/title/aria-label/data-* attribute values (do not read attributes as content)
-- Anchors linking to home/root (href="/" or root domain) or brand pages
+      ========================
+      TITLE vs DESCRIPTION
+      ========================
+      Mutually exclusive:
+      - If text is long or uses rich formatting → description, NOT title.
+      - If text is short and plain → candidate for title, NOT description.
 
-TITLE SELECTION (strict):
-- Prefer a product-specific <h1> within the main/product container; fallback to a strong <h2> only if it is clearly the product name.
-- Must be visible text content (not attributes), 3–120 chars, not equal to the site or brand name, and not just a category or collection.
-- Favor nodes within a container whose ancestors indicate product context (class/id with "product", near price/SKU/variants).
-- Reject candidates located inside excluded areas or with class/id indicating branding or navigation.
+      TITLE RULES:
+      - Must be visible TEXT CONTENT only (no attributes).
+      - Length 3–100 chars, ≤ 12 words, ≤ 1 sentence delimiter.
+      - No HTML tags, lists, or bullet markers.
+      - Not equal to site/brand name, not pure category/collection.
+      - Prefer <h1> in product container; fallback <h2> only if clearly the product name.
+      - Reject if formatting/length suggests description.
 
-DESCRIPTION SELECTION:
-- Treat sections headed by phrases like "About this item", "Product details", "Overview", "Key features" as valid description containers. If a heading like these is present, prefer the next content block (paragraphs or a <ul> list) as the description when it contains substantive product-specific information.
-- Prefer the primary product description container with paragraph-rich text; > 40 words of meaningful copy.
-- Allow minimal HTML only: <p>, <ul>, <li>, <strong>, <em>.
-- Exclude marketing banners, policy footers, or sitewide generic text; avoid content under footer/header/nav.
+      DESCRIPTION RULES:
+      - Prefer container under headings like "About this item", "Product details", "Overview", "Key features".
+      - Must have either:
+        • >80 words of meaningful copy, OR
+        • valid HTML structure (<p>, <ul>, <li>, <strong>, <em>).
+      - Exclude sitewide marketing/policy boilerplate.
+      - Never select the same node as title.
 
-SHIPPING/RETURNS SELECTION:
-- Prefer content containers (panels/sections) actually holding the text (NOT the tab/button/trigger).
-- Accept generic bullet points only if the fragment lacks concrete policy text.
-- Exclude footer sitewide policy links; use content adjacent to the product area when possible.
+      ========================
+      SHIPPING / RETURNS
+      ========================
+      - Target text inside panels/sections with policy content (not buttons/triggers).
+      - Prefer product-area policies over generic footer links.
+      - If unclear, concise truthful generic policy allowed.
 
- SELECTOR RULES (very strict and deterministic):
- - The selector MUST match at least one element in THIS fragment.
- - Prefer a single id if present (e.g., #product-title). If not, prefer a short class chain of 1–2 classes that are semantic and likely stable (e.g., .product .title). Avoid positional selectors.
- - Allowed attributes for targeting are limited to: id, class, data-testid, data-test, itemprop, aria-label, aria-labelledby. Do NOT use contains/starts-with attribute hacks.
- - DO NOT use :nth-child, :nth-of-type, :not(), wildcard *, or selectors that target button/tab triggers.
- - Target content containers (for description/shipping/returns), not triggers.
- - Provide a short selector_note explaining WHY this selector is the product field and what was excluded (e.g., "excluded header .logo title").
+      ========================
+      SELECTORS
+      ========================
+      - Selector MUST match at least one element in THIS fragment.
+      - Prefer stable ids (#product-title) or short semantic classes (".product .title").
+      - Reject obfuscated/dynamic classes (random hashes like ".css-abc123").
+      - Allowed attributes: id, class, data-testid, data-test, itemprop, aria-label, aria-labelledby.
+      - Do NOT use :nth-child, :nth-of-type, :not(), *, or selectors targeting triggers.
+      - Selector_note must briefly explain WHY this element was chosen and what was excluded.
 
-OUTPUT RULES:
-- Proposed values:
-  • title.proposed ≤ 70 chars, remove branding words; use "setText"
-  • description.proposed 120–200 words, minimal HTML; use "setHTML"
-  • shipping/returns proposed as <ul><li>…</li></ul> (generic if unclear); use "setHTML"
-- If you are NOT confident a field is present, omit it entirely. Do NOT hallucinate.
-- Output STRICT JSON with ONLY:
-{
-  "fields": {
-    "title"?: { "selector": string, "selector_note": string, "extracted": string, "proposed": string },
-    "description"?: { "selector": string, "selector_note": string, "extracted": string, "proposed": string },
-    "shipping"?: { "selector": string, "selector_note": string, "extracted": string, "proposed": string },
-    "returns"?: { "selector": string, "selector_note": string, "extracted": string, "proposed": string }
-  },
-  "patch": Array<{ "selector": string, "op": "setText"|"setHTML", "value": string }>
-}
-- Omit absent fields. No extra keys. No comments.
+      ========================
+      OUTPUT & PATCHES
+      ========================
+      - Proposed values:
+        • title.proposed: ≤ 70 chars, plain text, no formatting → use "setText"
+        • description.proposed: 120–200 words, clean HTML limited to <p>, <ul>, <li>, <strong>, <em> → use "setHTML"
+        • shipping/returns: <ul><li>…</li></ul>, concise and truthful → use "setHTML"
+      - Do NOT hallucinate: if no confident field, omit it.
+      - Patch array should ONLY include patch steps for fields you output in "fields". No extras.
+
+      ========================
+      STRICT JSON SHAPE
+      ========================
+      {
+        "fields": {
+          "title"?: { "selector": string, "selector_note": string, "extracted": string, "proposed": string },
+          "description"?: { "selector": string, "selector_note": string, "extracted": string, "proposed": string },
+          "shipping"?: { "selector": string, "selector_note": string, "extracted": string, "proposed": string },
+          "returns"?: { "selector": string, "selector_note": string, "extracted": string, "proposed": string }
+        },
+        "patch": Array<{ "selector": string, "op": "setText"|"setHTML", "value": string }>
+      }
+      - No absent fields, no extra keys, no comments.
       `.trim();
 
       const perChunk = await mapWithConcurrency(
