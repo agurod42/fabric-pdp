@@ -4,49 +4,8 @@
 (function(){
 const api = (typeof browser !== 'undefined') ? browser : chrome;
 
-/** Build a minimal scoring evaluation on a reduced HTML string plus meta fields. */
-function evaluateSignals(payload){
-	let score = 0;
-	const html = String(payload?.html_excerpt || "").slice(0, 200000);
-	const meta = payload?.meta || {};
-	const title = String(payload?.title || "");
-	const url = String(payload?.url || "");
-
-	// Quick anti routes
-	if (/\b(cart|checkout|basket|account|orders?|login|register|help|support|search)\b/i.test(url)) return { score: -10 };
-
-	// Structured/meta signals (regex over reduced HTML)
-	if (/\"@type\"\s*:\s*\"Product\"/i.test(html)) score += 3; // JSON-LD Product
-	if (/itemtype\s*=\s*\"[^\"]*schema\.org\/Product/i.test(html)) score += 2; // microdata
-	if (/property=\"og:type\"[^>]*content=\"product\"/i.test(html)) score += 2; // og product
-	if (/property=\"product:price:amount\"/i.test(html)) score += 2;
-
-	// CTA (EN + ES variants)
-	if (/(add to cart|buy now|add to bag|comprar(?: ahora| ya)?|añadir al carrito|añadir a la cesta|añadir a la bolsa|agregar al carrito|agregar a la cesta|agregar a la bolsa)/i.test(html)) score += 3;
-
-	// SKU / variants / qty
-	if (/\b(sku|mpn|model|ref\.?)[\s:]/i.test(html)) score += 2;
-	if (/(select[^>]+name=\"[^\"]*(size|color)|aria-label=\"[^\"]*(Size|Color))/i.test(html)) score += 2;
-	if (/(input[^>]+type=\"number\"[^>]+name=\"[^\"]*(qty|quantity)|aria-label=\"[^\"]*Quantity)/i.test(html)) score += 1;
-
-	// Shipping / Returns (EN + ES)
-	if (/(shipping|env[ií]o|envios|env[íi]os|delivery|entrega|despacho)/i.test(html)) score += 1;
-	if (/(returns?|devoluci[oó]n(?:es)?|cambios?|reembolsos?)/i.test(html)) score += 1;
-
-	// Anti-signals: many cards, facets, pagination
-	const repeatedPriceBlocks = html.match(/(?:\$|€|£)\s?\d[\d.,]*/g)?.length || 0;
-	const productCardHints = (html.match(/(data-product-card|class=\"[^\"]*product-card|data-sku=)/g) || []).length;
-	if (productCardHints >= 6 || repeatedPriceBlocks >= 12) score -= 4;
-	if (/class=\"[^\"]*(pagination)\b/i.test(html) || /aria-label=\"[^\"]*Pagination/i.test(html)) score -= 3;
-	if (/(data-facet|class=\"[^\"]*(facet|filters)\b|aria-label=\"[^\"]*Filter)/i.test(html)) score -= 3;
-
-	// Price near title heuristic via coarse check
-	const hasHeadline = /(\<h1[\s>]|\<h2[\s>]|itemprop=\"name\"|data-(test|qa)[^>]*title)/i.test(html);
-	const hasPrice = /(?:[$€£]\s?\d[\d.,]*)|(?:\d[\d.,]*\s?(?:USD|EUR|GBP))/i.test(html);
-	if (hasHeadline && hasPrice) score += 2;
-
-	return { score };
-}
+// Use shared evaluator
+const evaluateSignals = (payload) => (typeof self.evaluatePdpSignals === 'function' ? self.evaluatePdpSignals(payload) : { score: 0 });
 
 /** Discover stable selectors for title/description/shipping/returns on live page. */
 async function discoverSelectorsInPage(tabId){

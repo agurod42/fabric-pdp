@@ -47,6 +47,25 @@ async function callLLM(payload) {
 }
 
 async function llmStrategy(payload /*, ctx */) {
+  // Pre-check PDP likelihood using shared evaluator; skip LLM if unlikely
+  try {
+    if (typeof self.evaluatePdpSignals === 'function') {
+      const { score } = self.evaluatePdpSignals(payload) || { score: 0 };
+      if (typeof score === 'number' && score <= 0) {
+        return {
+          is_pdp: false,
+          confidence: 0,
+          language: String(payload?.language || ''),
+          url: String(payload?.url || ''),
+          trace_id: '',
+          fields: { title: { selector: '', selector_note: '', extracted: '', proposed: '' }, description: { selector: '', selector_note: '', extracted: '', proposed: '' }, shipping: { selector: '', selector_note: '', extracted: '', proposed: '' }, returns: { selector: '', selector_note: '', extracted: '', proposed: '' } },
+          patch: [],
+          diagnostics: { pdp_signals: [], anti_pdp_signals: [], duplicates_covered: [] },
+          warnings: ["Skipped LLM: page unlikely to be PDP based on pre-check"]
+        };
+      }
+    }
+  } catch {}
   return await callLLM(payload);
 }
 
