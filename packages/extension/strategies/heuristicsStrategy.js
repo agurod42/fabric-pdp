@@ -5,7 +5,11 @@
 const api = (typeof browser !== 'undefined') ? browser : chrome;
 
 // Use shared evaluator
-const evaluateSignals = (payload) => (typeof self.evaluatePdpSignals === 'function' ? self.evaluatePdpSignals(payload) : { score: 0 });
+const evaluateSignals = (payload) => {
+  const res = (typeof self.evaluatePdpSignals === 'function' ? self.evaluatePdpSignals(payload) : { score: 0 });
+  try { console.debug('[PDP][heuristics] evaluatePdpSignals score', res?.score, { url: payload?.url }); } catch {}
+  return res;
+};
 
 /** Discover stable selectors for title/description/shipping/returns on live page. */
 async function discoverSelectorsInPage(tabId){
@@ -186,7 +190,7 @@ async function buildPlan(payload, isPdp, score, ctx){
 
 /** Main entry for background: fast PDP detection with optional LLM fallback upstream */
 async function heuristicsStrategy(payload, ctx){
-	const { score } = evaluateSignals(payload);
+    const { score } = evaluateSignals(payload);
 	const isPdp = score >= 6;
 	if (score <= 0) return await buildPlan(payload, false, score, ctx);
 	return await buildPlan(payload, isPdp, score, ctx);

@@ -67,6 +67,7 @@ async function llmStrategy(payload /*, ctx */) {
   try {
     if (typeof self.evaluatePdpSignals === 'function') {
       const { score } = self.evaluatePdpSignals(payload) || { score: 0 };
+      try { console.debug('[PDP][llm] evaluatePdpSignals score', score, { url: payload?.url }); } catch {}
       if (typeof score === 'number' && score <= 0) {
         return {
           is_pdp: false,
