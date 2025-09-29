@@ -174,6 +174,10 @@ window.addEventListener("load", () => { log("window load"); setTimeout(main, 600
 // Expose sanitized HTML to popup/background for debugging downloads
 api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== 'object') return;
+  if (msg.type === 'RECOMPUTE') {
+    try { main(); } catch {}
+    return true;
+  }
   if (msg.type === 'GET_REDUCED_HTML') {
     try {
       const html = sanitizeHtmlFromDom();

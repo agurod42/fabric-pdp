@@ -30,6 +30,74 @@ async function cacheGet(key) {
   try { const obj = await storageArea.get([key]); return obj?.[key]; } catch(e) { log("cacheGet error", e?.message || e); return undefined; }
 }
 
+// Tab-scoped cache helpers
+function tabKey(ns, tabId){ return `${ns}:${tabId}`; }
+
+async function tabCacheSet(ns, tabId, value){
+  try {
+    const key = tabKey(ns, tabId);
+    sessionCache.set(key, value);
+    try { await cacheSet(key, value); } catch {}
+    return true;
+  } catch { return false; }
+}
+
+async function tabCacheGet(ns, tabId){
+  try {
+    const key = tabKey(ns, tabId);
+    let val = sessionCache.get(key);
+    if (typeof val === 'undefined') {
+      val = await cacheGet(key);
+      if (typeof val !== 'undefined') sessionCache.set(key, val);
+    }
+    return val;
+  } catch { return undefined; }
+}
+
+async function tabCacheClear(ns, tabId){
+  try {
+    const key = tabKey(ns, tabId);
+    sessionCache.delete(key);
+    try { await cacheSet(key, null); } catch {}
+  } catch {}
+}
+
+/** Clear cached state for a tab on navigation. */
+async function clearTabState(tabId){
+  try {
+    await Promise.all([
+      tabCacheClear('plan', tabId),
+      tabCacheClear('summary', tabId),
+      tabCacheSet('error', tabId, ""),
+      tabCacheSet('processing', tabId, false),
+    ]);
+  } catch {}
+}
+
+/** Trigger recompute on a tab after its URL changes. */
+async function handleNavigation(tabId, url){
+  try {
+    await clearTabState(tabId);
+    try { await setBadge("—", tabId); } catch {}
+    // Ask the content script to recompute with fresh page context
+    try { await api.tabs.sendMessage(tabId, { type: "RECOMPUTE", url }); } catch {}
+  } catch {}
+}
+
+// Debounce recompute on navigation to avoid thrash
+const navTimers = new Map();
+function scheduleRecompute(tabId, url){
+  try {
+    const prev = navTimers.get(tabId);
+    if (prev) clearTimeout(prev);
+    const t = setTimeout(() => {
+      navTimers.delete(tabId);
+      handleNavigation(tabId, url);
+    }, 350);
+    navTimers.set(tabId, t);
+  } catch {}
+}
+
 // Load strategies as separate modules into the service worker global scope
 try { importScripts("page/applyPatchInPage.js"); } catch(e) { log("importScripts applyPatchInPage error", e); }
 try { importScripts("strategies/heuristicsStrategy.js"); } catch(e) { log("importScripts heuristicsStrategy error", e); }
@@ -67,6 +135,49 @@ api.runtime.onInstalled.addListener(() => {
   api.action.setBadgeBackgroundColor({ color: "#00A86B" });
 });
 
+// Recompute plan when the tab URL changes (navigations)
+try {
+  api.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    try {
+      if (changeInfo && typeof changeInfo.url === 'string' && changeInfo.url) {
+        log("onUpdated:url", { tabId, url: changeInfo.url });
+        scheduleRecompute(tabId, changeInfo.url);
+      }
+    } catch {}
+  });
+} catch {}
+
+// Handle SPA route changes via History API
+try {
+  if (api.webNavigation && api.webNavigation.onHistoryStateUpdated) {
+    api.webNavigation.onHistoryStateUpdated.addListener((details) => {
+      try {
+        if (typeof details?.tabId === 'number' && typeof details?.url === 'string') {
+          log("onHistoryStateUpdated", { tabId: details.tabId, url: details.url });
+          scheduleRecompute(details.tabId, details.url);
+        }
+      } catch {}
+    });
+  }
+} catch {}
+
+// Patch apply helpers
+function pickApplySummary(arr){
+  if (!Array.isArray(arr)) return null;
+  try {
+    const main = arr.find(r => r && typeof r.frameId === 'number' && r.frameId === 0 && r.result);
+    if (main && main.result) return main.result;
+    const anyApplied = arr.find(r => r && r.result && r.result.steps_applied > 0);
+    if (anyApplied && anyApplied.result) return anyApplied.result;
+    return arr[0]?.result ?? null;
+  } catch { return arr[0]?.result ?? null; }
+}
+
+async function executePatchInWorld(tabId, world, plan){
+  const res = await api.scripting.executeScript({ target: { tabId, allFrames: true }, world, func: self.applyPatchInPage || applyPatchInPage, args: [plan] });
+  return pickApplySummary(res);
+}
+
 api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   log("message", { type: msg?.type, tabId: sender?.tab?.id });
   (async () => {
@@ -93,22 +204,15 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg.type === "CACHE_PLAN") {
         const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
         if (tabId != null) {
-          const key = `plan:${tabId}`;
-          sessionCache.set(key, msg.plan);
-          try { await cacheSet(key, msg.plan); } catch {}
-          log("CACHE_PLAN", { key });
+          await tabCacheSet('plan', tabId, msg.plan);
+          log("CACHE_PLAN", { tabId });
         }
         sendResponse({ ok: true }); return;
       }
       if (msg.type === "GET_PLAN") {
         const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
-        const key = (tabId != null) ? `plan:${tabId}` : undefined;
-        let plan = key ? sessionCache.get(key) : undefined;
-        if (!plan && key) {
-          plan = await cacheGet(key);
-          if (plan) sessionCache.set(key, plan);
-        }
-        log("GET_PLAN", { key, found: !!plan });
+        const plan = (tabId != null) ? await tabCacheGet('plan', tabId) : undefined;
+        log("GET_PLAN", { tabId, found: !!plan });
         sendResponse({ plan }); return;
       }
       if (msg.type === "APPLY_PATCH") {
@@ -118,112 +222,67 @@ api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         log("APPLY_PATCH start", { tabId, steps });
         try {
           if (tabId != null) { try { await setBadge("AP", tabId); } catch {} }
-          const pickSummary = (arr) => {
-            if (!Array.isArray(arr)) return null;
-            try {
-              const main = arr.find(r => r && typeof r.frameId === 'number' && r.frameId === 0 && r.result);
-              if (main && main.result) return main.result;
-              const anyApplied = arr.find(r => r && r.result && r.result.steps_applied > 0);
-              if (anyApplied && anyApplied.result) return anyApplied.result;
-              return arr[0]?.result ?? null;
-            } catch { return arr[0]?.result ?? null; }
-          };
-          const execWithWorld = async (world) => {
-            const res = await api.scripting.executeScript({ target: { tabId, allFrames: true }, world, func: self.applyPatchInPage || applyPatchInPage, args: [msg.plan] });
-            return pickSummary(res);
-          };
-          let summary = await execWithWorld('ISOLATED');
+          let summary = await executePatchInWorld(tabId, 'ISOLATED', msg.plan);
           // If nothing applied but there are steps, retry once after a short delay (late-loading DOMs)
           try {
             if (summary && summary.steps_total > 0 && summary.steps_applied === 0) {
               await new Promise(r => setTimeout(r, 1200));
-              summary = await execWithWorld('ISOLATED');
+              summary = await executePatchInWorld(tabId, 'ISOLATED', msg.plan);
             }
           } catch {}
           // If still nothing applied and steps exist, try MAIN world as a fallback
           try {
             if (steps > 0 && (!summary || summary.steps_applied === 0)) {
-              summary = await execWithWorld('MAIN');
+              summary = await executePatchInWorld(tabId, 'MAIN', msg.plan);
             }
           } catch {}
           log("APPLY_PATCH done", { took_ms: Date.now() - t0, summary });
           try {
-            const key = (tabId != null) ? `summary:${tabId}` : undefined;
-            if (key) {
-              sessionCache.set(key, summary);
-              try { await cacheSet(key, summary); } catch {}
-              log("APPLY_PATCH cached summary", { key });
-            }
+            if (tabId != null) { await tabCacheSet('summary', tabId, summary); log("APPLY_PATCH cached summary", { tabId }); }
           } catch {}
           sendResponse({ ok: true, summary }); return;
         } catch (e) {
           console.error("[PDP][bg] APPLY_PATCH error", e);
           try {
-            const errKey = (tabId != null) ? `error:${tabId}` : undefined;
             const msgStr = String(e?.message || e);
-            if (errKey) { sessionCache.set(errKey, msgStr); try { await cacheSet(errKey, msgStr); } catch {} }
+            if (tabId != null) { await tabCacheSet('error', tabId, msgStr); }
           } catch {}
           sendResponse({ error: String(e) }); return;
         }
       }
       if (msg.type === "GET_APPLY_SUMMARY") {
         const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
-        const key = (tabId != null) ? `summary:${tabId}` : undefined;
-        let summary = key ? sessionCache.get(key) : undefined;
-        if (!summary && key) {
-          summary = await cacheGet(key);
-          if (summary) sessionCache.set(key, summary);
-        }
-        log("GET_APPLY_SUMMARY", { key, found: !!summary });
+        const summary = (tabId != null) ? await tabCacheGet('summary', tabId) : undefined;
+        log("GET_APPLY_SUMMARY", { tabId, found: !!summary });
         sendResponse({ summary }); return;
       }
       if (msg.type === "GET_LAST_ERROR") {
         const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
-        const key = (tabId != null) ? `error:${tabId}` : undefined;
-        let err = key ? sessionCache.get(key) : undefined;
-        if (!err && key) {
-          err = await cacheGet(key);
-          if (err) sessionCache.set(key, err);
-        }
+        const err = (tabId != null) ? await tabCacheGet('error', tabId) : undefined;
         const has = typeof err === 'string' && err.trim().length > 0;
-        log("GET_LAST_ERROR", { key, has });
+        log("GET_LAST_ERROR", { tabId, has });
         sendResponse({ error: has ? err : null }); return;
       }
       if (msg.type === "SET_PROCESSING") {
         const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
-        const key = (tabId != null) ? `processing:${tabId}` : undefined;
         const val = !!msg.processing;
-        if (key) {
-          sessionCache.set(key, val);
-          try { await cacheSet(key, val); } catch {}
-          log("SET_PROCESSING", { key, val });
-        }
+        if (tabId != null) { await tabCacheSet('processing', tabId, val); log("SET_PROCESSING", { tabId, val }); }
         sendResponse({ ok: true }); return;
       }
       if (msg.type === "GET_PROCESSING") {
         const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
-        const key = (tabId != null) ? `processing:${tabId}` : undefined;
         (async () => {
-          let val = key ? sessionCache.get(key) : undefined;
-          if (typeof val === 'undefined' && key) {
-            val = await cacheGet(key);
-            if (typeof val !== 'undefined') sessionCache.set(key, val);
-          }
+          const val = (tabId != null) ? await tabCacheGet('processing', tabId) : undefined;
           const processing = !!val;
-          log("GET_PROCESSING", { key, processing });
+          log("GET_PROCESSING", { tabId, processing });
           sendResponse({ processing });
         })();
         return true;
       }
       if (msg.type === "SET_LAST_ERROR") {
         const tabId = (typeof msg.tabId === 'number') ? msg.tabId : sender.tab?.id;
-        const key = (tabId != null) ? `error:${tabId}` : undefined;
         const val = String(msg.error || msg.message || "");
-        if (key) {
-          sessionCache.set(key, val);
-          try { await cacheSet(key, val); } catch {}
-          log("SET_LAST_ERROR", { key, len: val.length });
-        }
+        if (tabId != null) { await tabCacheSet('error', tabId, val); log("SET_LAST_ERROR", { tabId, len: val.length }); }
         sendResponse({ ok: true }); return;
       }
       if (msg.type === "SHOULD_RUN") {
