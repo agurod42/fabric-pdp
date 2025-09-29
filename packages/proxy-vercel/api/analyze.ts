@@ -51,8 +51,26 @@ async function chatJSON(
     }
     const json = await resp.json();
     const txt = (json?.choices?.[0]?.message?.content ?? "").trim();
-    const raw = txt.slice(txt.indexOf("{"), txt.lastIndexOf("}") + 1) || "{}";
-    return JSON.parse(raw);
+    const start = txt.indexOf("{");
+    const end = txt.lastIndexOf("}");
+    let raw = (start >= 0 && end > start) ? txt.slice(start, end + 1) : "{}";
+    // Remove common wrappers like code fences
+    if (/^```/.test(raw)) {
+      const s = raw.indexOf("{"); const e = raw.lastIndexOf("}");
+      raw = (s >= 0 && e > s) ? raw.slice(s, e + 1) : raw;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      try {
+        // Fallback: strip trailing commas
+        const fixed = raw.replace(/,(\s*[}\]])/g, "$1");
+        return JSON.parse(fixed);
+      } catch {
+        // Last resort: ignore this chunk
+        return {} as ChunkResult;
+      }
+    }
   } finally {
     clearTimeout(timer);
   }
