@@ -8,7 +8,6 @@ const log = (...args) => { if (DEBUG) console.debug("[PDP][options]", ...args); 
 const STRATEGIES = [
   { id: "heuristicsStrategy", label: "Heuristics (very fast, local)" },
   { id: "llmStrategy", label: "Backend LLM (fallback)" },
-  { id: "webllmStrategy", label: "WebLLM (local, WebGPU)" },
 ];
 
 /** Fill a <select> with strategy options. */
@@ -37,7 +36,7 @@ async function load(){
   log("load settings");
   const cfg = await api.storage.local.get(["whitelist","strategySettings"]);
   const wl = cfg?.whitelist || [];
-  const s = cfg?.strategySettings || { global: "webllmStrategy", perDomain: [] };
+  const s = cfg?.strategySettings || { global: "llmStrategy", perDomain: [] };
   renderWhitelist(wl);
   renderStrategies(s);
 }
@@ -69,7 +68,7 @@ function renderStrategies(s){
   fillStrategySelect(document.getElementById("globalStrategy"));
   fillStrategySelect(document.getElementById("domainStrategy"));
   const g = document.getElementById("globalStrategy");
-  if (g) g.value = s.global || "webllmStrategy";
+  if (g) g.value = s.global || "llmStrategy";
 
   const list = document.getElementById("overrides");
   list.innerHTML = "";
@@ -116,7 +115,7 @@ document.getElementById("saveGlobal").addEventListener("click", async ()=>{
   const select = document.getElementById("globalStrategy");
   const id = select ? select.value : "llmStrategy";
   const cfg = await api.storage.local.get(["strategySettings"]);
-  const s = cfg?.strategySettings || { global: "webllmStrategy", perDomain: [] };
+  const s = cfg?.strategySettings || { global: "llmStrategy", perDomain: [] };
   await api.storage.local.set({ strategySettings: { ...s, global: id } });
   renderStrategies({ ...s, global: id });
   showToast("Global strategy saved");
@@ -127,7 +126,7 @@ document.getElementById("addOverride").addEventListener("click", async ()=>{
   const strategyId = document.getElementById("domainStrategy").value;
   if (!pattern) return;
   const cfg = await api.storage.local.get(["strategySettings"]);
-  const s = cfg?.strategySettings || { global: "webllmStrategy", perDomain: [] };
+  const s = cfg?.strategySettings || { global: "llmStrategy", perDomain: [] };
   const list = Array.isArray(s.perDomain) ? s.perDomain : [];
   list.push({ pattern, strategyId });
   await api.storage.local.set({ strategySettings: { ...s, perDomain: list } });
@@ -138,7 +137,7 @@ document.getElementById("addOverride").addEventListener("click", async ()=>{
 
 document.getElementById("clearOverrides").addEventListener("click", async ()=>{
   const cfg = await api.storage.local.get(["strategySettings"]);
-  const s = cfg?.strategySettings || { global: "webllmStrategy", perDomain: [] };
+  const s = cfg?.strategySettings || { global: "llmStrategy", perDomain: [] };
   await api.storage.local.set({ strategySettings: { ...s, perDomain: [] } });
   renderStrategies({ ...s, perDomain: [] });
   showToast("Overrides cleared");

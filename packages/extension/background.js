@@ -42,10 +42,9 @@ async function cacheGet(key) {
 try { importScripts("page/applyPatchInPage.js"); } catch(e) { log("importScripts applyPatchInPage error", e); }
 try { importScripts("strategies/heuristicsStrategy.js"); } catch(e) { log("importScripts heuristicsStrategy error", e); }
 try { importScripts("strategies/llmStrategy.js"); } catch(e) { log("importScripts llmStrategy error", e); }
-try { importScripts("strategies/webllmStrategy.js"); } catch(e) { log("importScripts webllmStrategy error", e); }
 try { importScripts("utils/utils.js"); } catch(e) { log("importScripts utils error", e); }
 
-const STRATEGY_DEFAULT_ID = "webllmStrategy";
+const STRATEGY_DEFAULT_ID = "llmStrategy";
 const STRATEGY_REGISTRY = {
   heuristicsStrategy: async (payload, ctx) => {
     if (typeof self.heuristicsStrategy === 'function') return await self.heuristicsStrategy(payload, ctx);
@@ -55,11 +54,6 @@ const STRATEGY_REGISTRY = {
   // Strategy ID: resolver function. Signature: (payload, ctx) => Promise<plan>
   llmStrategy: async (payload /*, ctx */) => {
     return await (self.llmStrategy ? self.llmStrategy(payload) : callLLM(payload));
-  },
-  webllmStrategy: async (payload, ctx) => {
-    if (typeof self.webllmStrategy === 'function') return await self.webllmStrategy(payload, ctx);
-    // Fallback to backend if webllm strategy not present
-    return await callLLM(payload);
   },
 };
 
@@ -243,8 +237,10 @@ async function resolvePlanWithStrategy(payload, tabId){
   try {
     const t0 = Date.now();
     const settings = await getStrategySettings();
-    const strategyId = chooseStrategyIdForUrl(payload?.url || "", settings);
-    const resolver = STRATEGY_REGISTRY[strategyId] || STRATEGY_REGISTRY[STRATEGY_DEFAULT_ID];
+    const candidateId = chooseStrategyIdForUrl(payload?.url || "", settings);
+    const exists = Object.prototype.hasOwnProperty.call(STRATEGY_REGISTRY, candidateId);
+    const strategyId = exists ? candidateId : STRATEGY_DEFAULT_ID;
+    const resolver = STRATEGY_REGISTRY[strategyId];
     const plan = await resolver(payload, { strategyId, tabId });
     const took = Date.now() - t0;
     if (plan && typeof plan === 'object') {
