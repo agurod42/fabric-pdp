@@ -91,6 +91,9 @@ async function init(){
   const resultEmoji = plan.is_pdp ? '✅' : 'ℹ️';
   const tookMs = (plan?.meta && typeof plan.meta.process_ms === 'number') ? plan.meta.process_ms : null;
   const tookStr = (tookMs != null) ? ` · ${(tookMs/1000).toFixed(2)}s` : '';
+  const strategyStr = (plan?.meta && typeof plan.meta.strategy_id === 'string' && plan.meta.strategy_id)
+    ? `<div class="status"><strong>Strategy:</strong> <code>${enc(plan.meta.strategy_id)}</code></div>`
+    : '';
   // Build list of additional applied changes beyond the primary field selectors
   let extraAppliedHtml = '';
   try {
@@ -125,6 +128,7 @@ async function init(){
         </button>
       </div>
     </div>
+    ${strategyStr}
     <div id="error" class="error" style="display:none"></div>
     <div id="diffs" class="diffs">
       ${renderFieldDiff('title','Title')}

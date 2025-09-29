@@ -251,6 +251,7 @@ async function resolvePlanWithStrategy(payload, tabId){
       try {
         plan.meta = plan.meta && typeof plan.meta === 'object' ? { ...plan.meta } : {};
         plan.meta.process_ms = took;
+        plan.meta.strategy_id = strategyId;
       } catch {}
     }
     if (tabId != null) {
