@@ -4,9 +4,9 @@ MV3 browser extension that detects PDPs (Product Detail Pages), proposes improve
 
 ### Highlights
 - **Auto‑apply**: Patch DOM with an audit summary; revert or re‑apply from the popup.
+- **Configurable**: Whitelist and per‑domain overrides via Options.
 - **Field extraction**: Title, description, shipping, returns.
 - **PDP detection**: Pluggable strategies — `llmStrategy` (backend) or `heuristicsStrategy` (local).
-- **Configurable**: Whitelist and per‑domain overrides via Options.
 
 ### Repo
 - `packages/extension/`: MV3 extension (background service worker, content script, page helper, popup, options, strategies)
@@ -14,8 +14,8 @@ MV3 browser extension that detects PDPs (Product Detail Pages), proposes improve
 
 ### Architecture
 - **Extension**: Background orchestrates; content script reduces DOM; page helper applies safe `setText`/`setHTML`; popup shows status and diffs; options manages whitelist and strategy overrides.
-- **Strategies**: Return a strict JSON plan with `is_pdp`, discovered selectors, and a minimal patch.
 - **Edge proxy**: Stateless `/api/analyze` and `/api/generate` endpoints with server‑side API keys.
+- **Strategies**: Return a strict JSON plan with `is_pdp`, discovered selectors, and a minimal patch.
 
 ```mermaid
 sequenceDiagram
@@ -42,10 +42,10 @@ sequenceDiagram
 ```
 
 #### Key decisions
-- **Quality vs locality**: `llmStrategy` tends to be higher quality; `heuristicsStrategy` is instant and offline.
-- **Safety over flexibility**: Only text/HTML updates on safe elements, with sanitization and denylists.
 - **Deterministic inputs**: DOM is reduced to a compact, stable excerpt to lower cost and variability.
 - **Edge simplicity**: Vercel Edge provides low‑latency, stateless scaling without a persistent backend.
+- **Quality vs locality**: `llmStrategy` tends to be higher quality; `heuristicsStrategy` is instant and offline.
+- **Safety over flexibility**: Only text/HTML updates on safe elements, with sanitization and denylists.
 
 ### How it works
 1) `content/content.js` produces a reduced HTML excerpt + metadata and asks background for a plan.
