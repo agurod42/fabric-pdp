@@ -182,11 +182,13 @@ async function captureViaHtml2Canvas(tabId) {
       const h2c = (window && (window).html2canvas) ? (window).html2canvas : null;
       if (!h2c || typeof h2c !== 'function') throw new Error('html2canvas not available: ensure vendor/html2canvas.min.js is packaged');
       window.scrollTo(0, 0);
+      // Clamp the capture scale to match what we actually use for rendering
+      const usedScale = Math.max(1, Math.min(2, dpr));
       const canvas = await h2c(document.documentElement, {
         useCORS: true,
         allowTaint: true,
         backgroundColor: '#ffffff',
-        scale: Math.max(1, Math.min(2, dpr)),
+        scale: usedScale,
         windowWidth: w,
         windowHeight: h,
         scrollX: 0,
@@ -199,7 +201,8 @@ async function captureViaHtml2Canvas(tabId) {
         meta: {
           image_pixel_width: canvas.width,
           image_pixel_height: canvas.height,
-          device_pixel_ratio: dpr,
+          // Report the actual scale used for capture (not raw window DPR) for consistency
+          device_pixel_ratio: usedScale,
           page_width_css: w,
           page_height_css: h,
         }
@@ -254,7 +257,12 @@ function selectorsFromDetections(detections, meta) {
     return true;
   }
   const pageW = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
-  const scale = (meta && meta.image_pixel_width && meta.page_width_css) ? (meta.image_pixel_width / meta.page_width_css) : (window.devicePixelRatio || 1);
+  // Prefer precise scale computed from canvas/page sizes; else use provided DPR; else fallback
+  const scale = (meta && meta.image_pixel_width && meta.page_width_css)
+    ? (meta.image_pixel_width / meta.page_width_css)
+    : (typeof (meta && meta.device_pixel_ratio) === 'number' && meta.device_pixel_ratio > 0
+        ? meta.device_pixel_ratio
+        : (window.devicePixelRatio || 1));
 
   const candidates = Array.from(document.querySelectorAll('h1,h2,h3,p,div,span,li,dd,dt,strong,em,section,article,td,th'))
     .filter(el => isVisible(el));
