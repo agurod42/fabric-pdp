@@ -2,19 +2,15 @@
 
 MV3 browser extension that detects PDPs (Product Detail Pages), proposes improved copy for key fields, and safely auto‑applies DOM edits with revert/re‑apply. An optional Vercel Edge proxy provides OpenAI‑backed analysis and copy.
 
+#### Downloads
+- **Chrome (zip)**: [`pdp-rewriter-extension.zip`](https://github.com/agurod42/fabric-pdp/releases/latest/download/pdp-rewriter-extension.zip)
+- **Safari (Xcode project, tgz)**: [`pdp-rewriter-safari-project.tgz`](https://github.com/agurod42/fabric-pdp/releases/latest/download/pdp-rewriter-safari-project.tgz)
+
 ### Highlights
 - **Auto‑apply**: Patch DOM with an audit summary; revert or re‑apply from the popup.
 - **Configurable**: Whitelist and per‑domain overrides via Options.
 - **Field extraction**: Title, description, shipping, returns.
 - **PDP detection**: Pluggable strategies — `llmStrategy` (backend) or `heuristicsStrategy` (local).
-
-### Repo
-- `packages/extension/`: MV3 extension (background service worker, content script, page helper, popup, options, strategies)
-- `packages/proxy-vercel/`: Vercel Edge API for `analyze` and `generate`
-
-### Downloads
-- **Chrome (zip)**: [`pdp-rewriter-extension.zip`](https://github.com/agurod42/fabric-pdp/releases/latest/download/pdp-rewriter-extension.zip)
-- **Safari (Xcode project, tgz)**: [`pdp-rewriter-safari-project.tgz`](https://github.com/agurod42/fabric-pdp/releases/latest/download/pdp-rewriter-safari-project.tgz)
 
 ### Architecture
 - **Extension**: Background orchestrates; content script reduces DOM; page helper applies safe `setText`/`setHTML`; popup shows status and diffs; options manages whitelist and strategy overrides.
@@ -63,29 +59,35 @@ sequenceDiagram
 
 Patch operations are restricted to `setText` and `setHTML`, with a selector denylist and automatic value prefixing (`[PDP]`) unless explicitly suppressed internally.
 
-### Strategies
+#### Strategies
 - `heuristicsStrategy`: Fast signal scoring and selector discovery; may return empty patches.
 - `llmStrategy`: Uses the Edge API to return a strict JSON plan.
 
-### Configuration (Options)
+#### Configuration (Options)
 - **Global strategy**: Choose default strategy.
 - **Per‑domain overrides**: Map host pattern → strategy.
 - **Whitelist**: Empty runs on all sites; otherwise restrict by host patterns (supports wildcards like `*.shopify.com`).
 
 ### Local development
-- **Prereqs**: Node 18+ (or 20+); macOS only if packaging for Safari.
-- **Install**:
 
-```bash
-npm install
-```
+#### Repo
+- `packages/extension/`: MV3 extension (background service worker, content script, page helper, popup, options, strategies)
+- `packages/proxy-vercel/`: Vercel Edge API for `analyze` and `generate`
+
+#### Get started
+
+- **Prereqs**: Node 18+ (or 20+); macOS only if packaging for Safari.
+
+- **Install**:
+  ```bash
+  npm install
+  ```
 
 - **Run the proxy (optional)**:
-
-```bash
-# With Vercel CLI installed and OPENAI env configured
-npm -w packages/proxy-vercel run dev
-```
+  ```bash
+  # With Vercel CLI installed and OPENAI env configured
+  npm -w packages/proxy-vercel run dev
+  ```
 
 - **Proxy env (Vercel)**:
   - `OPENAI_API_KEY` (required)
@@ -101,24 +103,13 @@ npm -w packages/proxy-vercel run dev
 
 - **Badge states**: `…` working, `PDP` detected, `AP` applying, `ERR` error.
 
-### Deploy proxy (Vercel)
+#### Deploy proxy (Vercel)
 1) `cd packages/proxy-vercel`
 2) `vercel` (or GitHub → Vercel integration)
 3) Add env vars in Vercel Project Settings → Environment Variables
 4) Note the deployment URL and update the extension background constants.
 
-### Package builds
-- **Build both (Chrome + Safari)**:
-
-```bash
-npm run build
-```
-
-Artifacts are output to:
-- `dist/chrome/pdp-rewriter-extension.zip` (unpacked at `dist/chrome/unpacked/`)
-- `dist/safari/PDP Rewriter/` (Xcode project) and `dist/safari/pdp-rewriter-safari-project.tgz`
-
-### Safety & limitations
+#### Safety & limitations
 - DOM patching is restricted and sanitized; selectors targeting `meta`, `script`, and `link` tags are excluded.
 
 ### License
