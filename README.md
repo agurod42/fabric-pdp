@@ -1,29 +1,21 @@
 ## PDP Rewriter
 
-An MV3 browser extension that detects PDPs (Product Detail Pages) with a pluggable strategy (backend LLM or fast heuristics), proposes improved copy for key fields, and auto-applies safe DOM edits with revert/re-apply support. A lightweight Vercel Edge proxy provides OpenAI-backed analysis and copy generation.
+MV3 browser extension that detects PDPs (Product Detail Pages), proposes improved copy for key fields, and safely auto‑applies DOM edits with revert/re‑apply. An optional Vercel Edge proxy provides OpenAI‑backed analysis and copy.
 
-### Features
-- **Auto-apply**: Patch DOM with an audit summary; revert/re-apply from popup.
+### Highlights
+- **Auto‑apply**: Patch DOM with an audit summary; revert or re‑apply from the popup.
 - **Field extraction**: Title, description, shipping, returns.
-- **PDP detection**: Decide if current page is a merchant PDP.
-- **Strategies**: `llmStrategy` (backend), `heuristicsStrategy` (fast local).
-- **Whitelist + per-domain strategy overrides**: Configure from Options.
+- **PDP detection**: Pluggable strategies — `llmStrategy` (backend) or `heuristicsStrategy` (local).
+- **Configurable**: Whitelist and per‑domain overrides via Options.
 
-### Monorepo Layout
-- `packages/extension/`: MV3 extension (background service worker, content script, options, popup, strategies)
+### Repo
+- `packages/extension/`: MV3 extension (background service worker, content script, page helper, popup, options, strategies)
 - `packages/proxy-vercel/`: Vercel Edge API for `analyze` and `generate`
 
 ### Architecture
-- **Extension (MV3)**: Split into a background service worker, a content script, an in-page patch helper, a popup UI, an options page, and pluggable strategies.
-  - **Content script (`content/content.js`)**: Sanitizes the live DOM into a small, deterministic HTML excerpt + page metadata. This limits payload size and reduces privacy risk, while producing consistent inputs for downstream strategies.
-  - **Background (`background.js`)**: Orchestrates the flow. It chooses a strategy globally or per-domain, requests a plan, applies the patch via the page helper, manages the badge state, and caches an apply summary for the popup.
-  - **In-page patch helper (`page/applyPatchInPage.js`)**: Applies a constrained set of operations (`setText` and `setHTML`) only to safe targets. It enforces sanitization rules, a denylist for risky selectors (e.g., `script`, `meta`, `link`), and optional value prefixing.
-  - **Popup (`popup/`)**: Surfaces status, diffs, and controls (Revert / Re-apply) for the current tab.
-  - **Options (`options/`)**: Hosts whitelist configuration and strategy selection/overrides.
-- **Strategies (`strategies/`)**: Produce a strict JSON plan with `is_pdp`, discovered selectors, and a minimal patch.
-  - **`llmStrategy`**: Calls a Vercel Edge endpoint backed by OpenAI. Pros: broad compatibility and typically higher model quality. Cons: network latency/cost and data egress (mitigated via DOM reduction and server-side key management).
-  - **`heuristicsStrategy`**: Fast, local signal scoring and selector discovery. Pros: instant and offline-friendly. Cons: less accurate PDP detection and lower-quality rewrite proposals.
-- **Edge Proxy (`packages/proxy-vercel/`)**: Stateless endpoints (`/api/analyze`, `/api/generate`) with API keys kept server-side. Edge runtime keeps latencies low globally.
+- **Extension**: Background orchestrates; content script reduces DOM; page helper applies safe `setText`/`setHTML`; popup shows status and diffs; options manages whitelist and strategy overrides.
+- **Strategies**: Return a strict JSON plan with `is_pdp`, discovered selectors, and a minimal patch.
+- **Edge proxy**: Stateless `/api/analyze` and `/api/generate` endpoints with server‑side API keys.
 
 ```mermaid
 sequenceDiagram
@@ -49,86 +41,75 @@ sequenceDiagram
     BG-->>User: Badge update + popup data
 ```
 
-#### Key Decisions & Trade-offs
-- **Quality vs. Locality**: `llmStrategy` (backend) generally yields higher quality; `heuristicsStrategy` runs locally and is offline-friendly but less accurate.
-- **Speed vs. Accuracy**: `heuristicsStrategy` is immediate and reliable under constrained environments but less precise than LLM-based approaches.
-- **Safety vs. Flexibility**: Patching is intentionally limited to text/HTML updates on safe elements with sanitization/denylist/prefixing. This reduces risk of breakage or injection but cannot handle complex widget rewrites.
-- **Determinism vs. Rich Context**: DOM is reduced to a small, stable excerpt to make prompts predictable and reduce payload size. Full-page context could improve quality but increases variability, cost, and privacy exposure.
-- **MV3 Constraints vs. Simplicity**: MV3’s ephemeral background encourages message-based orchestration and small state caches. This improves security and compliance with Chrome’s model, at the cost of added complexity around wake-ups and lifecycle.
-- **Edge Functions vs. Dedicated Backend**: Vercel Edge offers low-latency, stateless scaling with simple ops. A dedicated backend would enable more custom persistence/observability, but increases operational burden.
-- **Configurability vs. Autonomy**: Whitelist and per-domain strategy overrides give control over where/how the extension runs, reducing accidental changes at the cost of some setup.
+#### Key decisions
+- **Quality vs locality**: `llmStrategy` tends to be higher quality; `heuristicsStrategy` is instant and offline.
+- **Safety over flexibility**: Only text/HTML updates on safe elements, with sanitization and denylists.
+- **Deterministic inputs**: DOM is reduced to a compact, stable excerpt to lower cost and variability.
+- **Edge simplicity**: Vercel Edge provides low‑latency, stateless scaling without a persistent backend.
 
-### How It Works
-1) `content/content.js` sanitizes the current DOM into a reduced HTML excerpt + metadata; asks background to resolve a plan.
-2) `background.js` picks a strategy per domain/global setting and resolves a plan:
-   - `llmStrategy`: Calls the Vercel `analyze` endpoint (OpenAI backed) to return a plan.
-   - `heuristicsStrategy`: Fast local signal scoring + selector discovery.
-3) If `plan.is_pdp` is true, background applies `plan.patch` in-page via `page/applyPatchInPage.js` and caches an apply summary.
-4) `popup/` shows diffs (previous vs current), applied steps, and provides Revert/Re-apply.
+### How it works
+1) `content/content.js` produces a reduced HTML excerpt + metadata and asks background for a plan.
+2) `background.js` selects a strategy:
+   - `llmStrategy`: Calls the Edge `POST /api/analyze`.
+   - `heuristicsStrategy`: Computes a local plan.
+3) If `plan.is_pdp` is true, background applies `plan.patch` via `page/applyPatchInPage.js` and caches an apply summary.
+4) `popup/` shows diffs and provides Revert / Re‑apply.
 
-Selectors and content are validated to avoid script injection; patch operations are restricted to `setText` (title) and `setHTML` (others), with a denylist and automatic value prefixing (`[PDP]`) unless explicitly suppressed by internal flows.
+Patch operations are restricted to `setText` and `setHTML`, with a selector denylist and automatic value prefixing (`[PDP]`) unless explicitly suppressed internally.
 
 ### Strategies
-- `heuristicsStrategy`: Fast PDP signal scoring and best-effort selector discovery; returns a schema-compatible plan with empty patches.
-- `llmStrategy`: Calls the Edge API `POST /api/analyze` which uses OpenAI to return a strict JSON plan.
+- `heuristicsStrategy`: Fast signal scoring and selector discovery; may return empty patches.
+- `llmStrategy`: Uses the Edge API to return a strict JSON plan.
 
-### Options
-Open the extension’s Options page:
-- **Global Strategy**: Choose default strategy.
-- **Per-domain Overrides**: Map host pattern → specific strategy.
-- **Whitelist**: If empty, extension runs on all sites; otherwise restrict by host patterns (supports wildcards like `*.shopify.com`).
+### Configuration (Options)
+- **Global strategy**: Choose default strategy.
+- **Per‑domain overrides**: Map host pattern → strategy.
+- **Whitelist**: Empty runs on all sites; otherwise restrict by host patterns (supports wildcards like `*.shopify.com`).
 
-### Development
-Prereqs:
-- macOS for Safari tooling (optional)
-- Node 18+ (or 20+), npm
-
-Install:
+### Local development
+- **Prereqs**: Node 18+ (or 20+); macOS only if packaging for Safari.
+- **Install**:
 
 ```bash
 npm install
 ```
 
-Run the Edge proxy locally (optional; otherwise use a deployed URL):
+- **Run the proxy (optional)**:
 
 ```bash
-# In another terminal, with Vercel CLI installed and OPENAI env configured
+# With Vercel CLI installed and OPENAI env configured
 npm -w packages/proxy-vercel run dev
 ```
 
-Environment for proxy (Vercel):
-- `OPENAI_API_KEY` (required)
-- `OPENAI_BASE_URL` (optional; default OpenAI API)
-- `OPENAI_MODEL` (default: `gpt-4.1`)
+- **Proxy env (Vercel)**:
+  - `OPENAI_API_KEY` (required)
+  - `OPENAI_BASE_URL` (optional; default OpenAI API)
+  - `OPENAI_MODEL` (default: `gpt-4.1`)
 
-Update the extension background endpoints if you deploy the proxy:
-- In `packages/extension/background.js` set `PROXY_URL` and `PROXY_GENERATE_URL` to your deployment.
+- **Point extension to your proxy**: Update `PROXY_URL` and `PROXY_GENERATE_URL` in `packages/extension/background.js`.
 
-Load the extension in Chrome:
-1) Open chrome://extensions
-2) Enable Developer mode
-3) Load unpacked → select `packages/extension`
+- **Load in Chrome**:
+  1) Open chrome://extensions
+  2) Enable Developer mode
+  3) Load unpacked → select `packages/extension`
 
-Popup shows status for the active tab. The badge cycles: `…` (working), `PDP` (detected), `AP` (applying), `ERR` (error).
+- **Badge states**: `…` working, `PDP` detected, `AP` applying, `ERR` error.
 
-### Deploy the Proxy (Vercel)
+### Deploy proxy (Vercel)
 1) `cd packages/proxy-vercel`
 2) `vercel` (or GitHub → Vercel integration)
 3) Add env vars in Vercel Project Settings → Environment Variables
 4) Note the deployment URL and update the extension background constants.
 
-### Manual Packaging
-- Chrome: zip the contents of `packages/extension` and upload to the Chrome Web Store dashboard.
-- Safari: generate an Xcode project using Apple’s converter, then build/sign in Xcode.
-
-Chrome (local):
+### Package builds
+- **Chrome**:
 
 ```bash
 cd packages/extension
 zip -r ../pdp-rewriter-chrome.zip . -x "**/node_modules/**" "**/.DS_Store"
 ```
 
-Safari (local):
+- **Safari**:
 
 ```bash
 # Requires Xcode 13+ on macOS
@@ -138,10 +119,10 @@ xcrun safari-web-extension-converter "$(pwd)/packages/extension" \
   --copy-resources --no-open --force --macos-only
 ```
 
-This produces an Xcode project under `build-safari/` you can open and sign.
+Produces an Xcode project under `build-safari/` you can open and sign.
 
-### Safety & Limitations
-- DOM patching is restricted and sanitized; selectors targeting meta/script/link tags are excluded.
+### Safety & limitations
+- DOM patching is restricted and sanitized; selectors targeting `meta`, `script`, and `link` tags are excluded.
 
 ### License
 MIT
