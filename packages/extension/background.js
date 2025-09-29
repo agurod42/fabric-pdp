@@ -293,11 +293,12 @@ async function resolvePlanWithStrategy(payload, tabId){
     const plan = await resolver(payload, { strategyId, tabId });
     const took = Date.now() - t0;
     if (plan && typeof plan === 'object') {
-      try {
-        plan.meta = plan.meta && typeof plan.meta === 'object' ? { ...plan.meta } : {};
-        plan.meta.process_ms = took;
-        plan.meta.strategy_id = strategyId;
-      } catch {}
+      const patchLen = Array.isArray(plan?.patch) ? plan.patch.length : 0;
+      if (patchLen === 0) plan.is_pdp = false;
+
+      plan.meta = plan.meta && typeof plan.meta === 'object' ? { ...plan.meta } : {};
+      plan.meta.process_ms = took;
+      plan.meta.strategy_id = strategyId;
     }
     if (tabId != null) {
       const key = `plan:${tabId}`;
