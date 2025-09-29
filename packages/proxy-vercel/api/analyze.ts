@@ -40,7 +40,7 @@ async function chatJSON(
   apiKey: string,
   traceId: string,
   messages: Array<{ role: "system" | "user"; content: string }>,
-  timeoutMs = 60000
+  timeoutMs = 90000
 ): Promise<ChunkResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("timeout"), timeoutMs);
