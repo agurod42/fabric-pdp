@@ -49,15 +49,20 @@ async function init(){
     if (summary && typeof summary === 'object') latestSummary = summary;
   } catch {}
 
-  /** Render diff for a single field ONLY if it has at least one applied patch. */
+  /** Render a single field. Always show label; if no selector was found, show a note. */
   const renderFieldDiff = (key, label) => {
     const f = plan.fields?.[key] || {};
     const hasSelector = typeof f.selector === 'string' && f.selector.length > 0;
-    const selector = hasSelector ? enc(f.selector) : '<span style="color:#6b7280">(no selector)</span>';
+    const selector = hasSelector ? enc(f.selector) : '<span style="color:#6b7280">no selector found</span>';
     const allowHTML = !!f.html;
-    // If no selector, skip entirely (show only applied patches)
+    // If no selector, still render the field label and a message
     if (!hasSelector) {
-      return '';
+      return `
+      <div class="diff-item">
+        <div class="label">${label}</div>
+        <div class="selector"><small class="mono">${selector}</small></div>
+      </div>
+      `;
     }
     // Require at least one applied patch for this selector
     let appliedForField = [];
