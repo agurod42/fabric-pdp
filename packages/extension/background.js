@@ -3,6 +3,7 @@
 const api = (typeof browser !== 'undefined') ? browser : chrome;
 const PROXY_URL = "https://fabric-pdp.vercel.app/api/analyze"; // set your deployed URL
 const PROXY_GENERATE_URL = "https://fabric-pdp.vercel.app/api/generate";
+const PROXY_OCR_URL = "https://fabric-pdp.vercel.app/api/ocr";
 const DEBUG = true;
 const log = (...args) => { if (DEBUG) console.debug("[PDP][bg]", ...args); };
 
@@ -31,6 +32,7 @@ async function cacheGet(key) {
 // Load strategies as separate modules into the service worker global scope
 try { importScripts("strategies/llmStrategy.js"); } catch(e) { log("importScripts llmStrategy error", e); }
 try { importScripts("strategies/jsonLdStrategy.js"); } catch(e) { log("importScripts jsonLdStrategy error", e); }
+try { importScripts("strategies/ocrStrategy.js"); } catch(e) { log("importScripts ocrStrategy error", e); }
 try { importScripts("page/applyPatchInPage.js"); } catch(e) { log("importScripts applyPatchInPage error", e); }
 try { importScripts("utils/utils.js"); } catch(e) { log("importScripts utils error", e); }
 
@@ -43,6 +45,10 @@ const STRATEGY_REGISTRY = {
   jsonLdStrategy: async (payload, ctx) => {
     if (typeof self.resolveViaJsonLd === 'function') return await self.resolveViaJsonLd(payload, ctx);
     return await resolveViaJsonLd(payload, ctx); // fallback if imported symbol missing
+  },
+  ocrStrategy: async (payload, ctx) => {
+    if (typeof self.resolveViaOCR === 'function') return await self.resolveViaOCR(payload, ctx);
+    return await resolveViaOCR(payload, ctx);
   },
 };
 
